@@ -1,8 +1,8 @@
 Copyright 2025 Muchang Bahng, Erick Jiang, Paul Rosu, Rico Zhu, Vahid Tarokh
 
-Portions of this software are copyright of their respective authors and released
+This software have been built upon the codebase of the respective authors and released
 under the MIT license:
-- Soft 1, Copyright 2024 Fondazione Bruno Kessler
+- Copyright 2024 Fondazione Bruno Kessler (https://github.com/DSIP-FBK/DiffScaler)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the “Software”), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 
