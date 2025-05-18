@@ -9,7 +9,7 @@
 
 ## Overview
 
-**LDM_res** implements a physics‑conditioned Latent Diffusion Model (LDM) for statistical downscaling of meteorological fields.  Given coarse ERA5 reanalysis inputs and optional static high‑resolution features, LDM_res reconstructs fine‑scale 2 m temperature (and UV wind components) with improved physical consistency via a novel PDE‑based regularization.
+**LDM_res** implements a physics‑conditioned Latent Diffusion Model (LDM) for statistical downscaling of meteorological fields.  Given coarse ERA5 reanalysis inputs and static high‑resolution features, LDM_res reconstructs fine‑scale 2 m temperature with improved physical consistency via a novel PDE‑based regularization.
 
 This repository provides:
 - Training and inference code for the LDM_res model and baselines.
