@@ -3,3 +3,4 @@ slurm_logs/
 data/
 pretrained_models/
 outputs/
+wandb/ 
