@@ -24,11 +24,7 @@ This work builds heavily on the [DiffScaler](https://github.com/DSIP-FBK/DiffSca
 ## Installation
 
 ```bash
-# Clone the project
-git clone https://github.com/YourGithubName/ldm_res.git
-cd ldm_res
-
-# Create Python virtual environment
+# After cloning the project, breate Python virtual environment
 python3 -m venv .venv
 source .venv/bin/activate
 
@@ -52,10 +48,19 @@ bash download_full_dataset.sh
 bash Better_download_full_dataset.sh
 ```
 
-### Pretrained Checkpoints (~12 GB)
+### Pretrained Checkpoints (~15 GB)
 ```bash
+# Original model download in Tomasi
 cd pretrained_models
 bash download_pretrained_models.sh
+
+# PDE Loss Model 
+mkdir -p logs/checkpoints
+cd logs/checkpoints 
+wget "https://zenodo.org/records/15460090/files/pde_loss_model_checkpoint.ckpt?download=1" -O pde_loss_model_checkpoint.zip
+unzip pde_loss_model_checkpoint.zip
+
+# Once PDE loss model is downloaded you can run inference in notebooks/models_inference.ipynb
 ```
 
 ## Configuration
