@@ -50,15 +50,8 @@ bash Better_download_full_dataset.sh
 
 ### Pretrained Checkpoints (~15 GB)
 ```bash
-# Original model download in Tomasi
 cd pretrained_models
 bash download_pretrained_models.sh
-
-# PDE Loss Model 
-mkdir -p logs/checkpoints
-cd logs/checkpoints 
-wget "https://zenodo.org/records/15460090/files/pde_loss_model_checkpoint.ckpt?download=1" -O pde_loss_model_checkpoint.zip
-unzip pde_loss_model_checkpoint.zip
 
 # Once PDE loss model is downloaded you can run inference in notebooks/models_inference.ipynb
 ```
