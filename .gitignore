@@ -3,3 +3,23 @@ slurm_logs/
 data/
 outputs/
 wandb/ 
+
+# cache files
+src/utils/__pycache__/
+src/models/components/__pycache__/
+src/models/components/ldm/denoiser/__pycache__/
+src/models/__pycache__/
+src/models/components/__pycache__/
+src/models/components/ldm/__pycache__/
+
+# model checkpoints
+*.ckpt
+
+# logs
+*.log
+slurm_logs/
+
+# local / external
+DiffScaler/
+LDM-downscaling
+pretrained_models/wget-log

@@ -1,15 +1,32 @@
 #!/bin/bash
 set -e
 
-# Function to download a file with robust options
+# Download to a mount/large storage. Set via env or use repo's LDM-downscaling.
+# Example: DOWNLOAD_DIR=/mnt/LDM-downscaling bash Better_download_full_dataset.sh
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+DOWNLOAD_DIR="${DOWNLOAD_DIR:-$REPO_ROOT/LDM-downscaling}"
+
+mkdir -p "$DOWNLOAD_DIR"
+cd "$DOWNLOAD_DIR"
+
+# Function to download a file with robust options via SSH reverse proxy (zenodo.org -> localhost:8080)
+# -c: continue partial download if file already exists
 download_file() {
     local url="$1"
     local outfile="$2"
     echo "Downloading $outfile ..."
-    wget -c -t 0 --waitretry=5 --read-timeout=20 --timeout=30 "$url" -O "$outfile"
+
+    # Replace domain in the URL to route through the SSH reverse proxy
+    local proxied_url="${url/https:\/\/zenodo.org/https:\/\/localhost:8080}"
+
+    wget --no-check-certificate \
+         --header="Host: zenodo.org" \
+         -c -t 0 --waitretry=5 --read-timeout=20 --timeout=30 \
+         "$proxied_url" -O "$outfile"
 }
 
-# Download data files from Zenodo
+# Download data files from Zenodo (into DOWNLOAD_DIR)
 download_file "https://zenodo.org/records/12944960/files/2000-2002.zip?download=1" "2000-2002.zip"
 download_file "https://zenodo.org/records/12945014/files/2003-2005.zip?download=1" "2003-2005.zip"
 download_file "https://zenodo.org/records/12945028/files/2006-2008.zip?download=1" "2006-2008.zip"
@@ -25,4 +42,4 @@ for file in *.zip; do
     rm "$file"
 done
 
-echo "All files downloaded and extracted."
+echo "All files downloaded and extracted under $DOWNLOAD_DIR"
