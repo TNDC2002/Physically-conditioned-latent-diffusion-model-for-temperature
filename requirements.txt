@@ -1,7 +1,5 @@
---extra-index-url https://download.pytorch.org/whl/cu118
-# --------- pytorch --------- #
-torch==2.0.1
-torchvision==0.15.2
+# Pytorch builds for Python 3.13 (GPU wheels installed separately via cu124 index)
+torch==2.5.1
 lightning==2.0.5
 # torchmetrics==1.0.1
 
@@ -24,14 +22,14 @@ rich            # beautiful text formatting in terminal
 pytest          # tests
 # sh            # for running bash commands in some tests (linux/macos only)
 
-numpy==1.25.1
-pandas==2.0.3
-geopandas==0.13.2
+numpy==1.26.4
+pandas==2.2.3
+geopandas>=0.14
 zstandard
 tensorboard
 xarray
 rioxarray
-matplotlib==3.8.4
+matplotlib>=3.10.0
 einops
 numba
 pysteps
