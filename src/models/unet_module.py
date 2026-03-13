@@ -61,18 +61,24 @@ class UnetLitModule(LightningModule):
             print(f"Unexpected Keys: {unexpected}")
 
     def forward(self, x: torch.Tensor):
-        # x = torch.repeat_interleave(x, 8, dim=2)
-        # x = torch.repeat_interleave(x, 8, dim=3)
         return self.net(x)
 
-    # def on_train_start(self):
-    #     # by default lightning executes validation step sanity checks before training starts,
-    #     # so it's worth to make sure validation metrics don't store results from these checks
-    #     # self.val_loss.reset()
+    @staticmethod
+    def _merge_lr_and_static(low_res: torch.Tensor, static: torch.Tensor) -> torch.Tensor:
+        """Upsample low_res to high-res grid and concatenate with static on channels (same as VAE/LDM path)."""
+        low_res = torch.repeat_interleave(low_res, 8, dim=2)
+        low_res = torch.repeat_interleave(low_res, 8, dim=3)
+        return torch.cat([low_res, static], dim=1)
 
     def model_step(self, batch: Any):
-        lr, hr, ts_ns = batch
-        hr_pred = self.forward(lr)
+        # Dataset returns (lr, hr, ref_time) when nn_lowres or no static; (lr, hr, static, ref_time) when static_vars and not nn_lowres
+        if len(batch) == 4:
+            lr, hr, static, ts_ns = batch
+            unet_input = self._merge_lr_and_static(lr, static)
+        else:
+            lr, hr, ts_ns = batch
+            unet_input = lr
+        hr_pred = self.forward(unet_input)
         loss = self.loss(hr_pred, hr)
         return loss, hr_pred
 
