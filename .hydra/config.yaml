@@ -33,7 +33,7 @@ data:
     - W850
     high_res:
     - 2mT
-  batch_size: 16
+  batch_size: 8
   num_workers: 2
   pin_memory: true
   crop_size: 512

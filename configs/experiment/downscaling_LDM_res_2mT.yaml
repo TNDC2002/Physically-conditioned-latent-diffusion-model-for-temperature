@@ -16,7 +16,7 @@ data:
   target_vars:
     high_res: ['2mT']
   crop_size: 512
-  batch_size: 16
+  batch_size: 8
   num_workers: 2
   nn_lowres: False
 
@@ -33,4 +33,5 @@ model:
       ckpt_path: ${paths.pretrained_models_dir}UNET_2mT.ckpt
   ae_load_state_file: ${paths.pretrained_models_dir}VAE_residual_2mT.ckpt
 
-ckpt_path: '/usr/project/xtmp/par55/DiffScaler/pretrained_models/LDM_residual_2mT.ckpt'
+# Use local pretrained_models after running pretrained_models/download_pretrained_models.sh
+ckpt_path: ${paths.pretrained_models_dir}LDM_residual_2mT.ckpt
