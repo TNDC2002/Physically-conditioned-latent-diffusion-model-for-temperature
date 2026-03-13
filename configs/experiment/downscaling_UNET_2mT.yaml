@@ -17,6 +17,7 @@ tags: ["downscaling", "unet_2mT"]
 data:
   target_vars:
     high_res: ['2mT']
+  batch_size: 32   # override default 8 to better use ~80GB GPU (was ~18GB at bs=8)
 
 # # if we want to resume training from a checkpoint
 # ckpt_path: '/home/gabriele/Documents/fbk/icsc/downscaling-hydra/logs/train/runs/2024-01-23_13-27-40/checkpoints/last.ckpt'

@@ -108,3 +108,5 @@ python3 src/train.py experiment=downscaling_LDM_res_2mT
 
 For detailed usage patterns, advanced configurations, and troubleshooting tips, please refer to the original DiffScaler README and documentation.
 
+srun --jobid=5655 --pty watch -n 10 nvidia-smi
+tensorboard --logdir logs/train/runs
