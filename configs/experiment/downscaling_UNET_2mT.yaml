@@ -19,5 +19,7 @@ data:
     high_res: ['2mT']
   batch_size: 32   # override default 8 to better use ~80GB GPU (was ~18GB at bs=8)
 
-# # if we want to resume training from a checkpoint
-# ckpt_path: '/home/gabriele/Documents/fbk/icsc/downscaling-hydra/logs/train/runs/2024-01-23_13-27-40/checkpoints/last.ckpt'
+# Resume training: set ckpt_path and trainer.max_epochs at ROOT level (same as "data", not indented under it)
+ckpt_path: /home/chuongtnd/git-repo/Physically-conditioned-latent-diffusion-model-for-temperature/logs/train/runs/2026-03-14_06-45-07/checkpoints/last.ckpt
+trainer:
+  max_epochs: 50
