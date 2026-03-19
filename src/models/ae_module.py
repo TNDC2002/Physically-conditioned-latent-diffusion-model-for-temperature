@@ -117,7 +117,18 @@ class AutoencoderKL(LightningModule):
         }
     
     def preprocess_batch(self, batch):
-        (low_res, high_res, smt) = batch
+        # DownscalingDataset returns either:
+        # - (low_res, high_res, smt)  where smt is a static tensor (or other side input)
+        # - (low_res, high_res, smt, ref_time) when ref_time is additionally provided
+        if isinstance(batch, (list, tuple)):
+            if len(batch) == 3:
+                (low_res, high_res, smt) = batch
+            elif len(batch) == 4:
+                (low_res, high_res, smt, _ref_time) = batch
+            else:
+                raise ValueError(f"Unexpected batch structure (len={len(batch)}). Expected 3 or 4 items.")
+        else:
+            raise TypeError(f"Unexpected batch type: {type(batch)}. Expected tuple/list.")
         if self.ae_flag is None:
             return low_res, high_res
         elif self.ae_flag == 'residual':
@@ -125,6 +136,13 @@ class AutoencoderKL(LightningModule):
             if low_res.shape[-2::] != high_res.shape[-2::]:
                 # Assuming you are running an ldm and therefore passing low_res not interpolated
                 # and smt is static data: nearest-neighboring low-res and cat it to static data...')
+                if smt is None:
+                    raise ValueError(
+                        "Got low_res/high_res with different spatial sizes, but no static tensor in batch. "
+                        "This typically means your dataset is configured with nn_lowres=True (so low_res is upscaled) "
+                        "or you are not returning static vars. Either set nn_lowres=False with static_vars enabled, "
+                        "or ensure low_res and high_res have matching spatial sizes."
+                    )
                 low_res = self.nn_lr_and_merge_with_static(low_res, smt)
             residual = high_res - self.unet(low_res)
             return residual, residual

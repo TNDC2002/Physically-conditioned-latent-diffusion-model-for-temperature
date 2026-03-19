@@ -95,9 +95,7 @@ Example with a one-off Slurm job (adjust paths and partition/GPU to match your c
 
 ```bash
 # From repo root
-sbatch --job-name=run_inference_nb --partition=main --gres=gpu:nvidia_h100_80gb_hbm3:1 \
-  --mem=64G --time=1:00:00 --output=slurm_logs/inference_nb-%j.out \
-  --wrap="cd $PWD && export PYTHONPATH=$PWD:\$PYTHONPATH && .venv/bin/jupyter nbconvert --to notebook --execute notebooks/models_inference.ipynb --output=models_inference_executed.ipynb"
+sbatch --job-name=run_inference_nb --partition=main --gres=gpu:nvidia_h100_80gb_hbm3:1   --mem=64G --time=1:00:00 --output=slurm_logs/inference_nb-%j.out --error=slurm_logs/inference_nb-%j.err   --wrap="cd $PWD && export PYTHONPATH=$PWD:\$PYTHONPATH && .venv/bin/jupyter nbconvert --to notebook --execute notebooks/models_inference.ipynb --output=models_inference_executed.ipynb"
 ```
 
 Or execute as Python script:

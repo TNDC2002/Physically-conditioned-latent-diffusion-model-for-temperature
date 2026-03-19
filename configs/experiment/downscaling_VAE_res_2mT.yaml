@@ -18,12 +18,13 @@ data:
   target_vars:
     high_res: ['2mT']
   crop_size: 512
-  batch_size: 16
-  num_workers: 32
+  batch_size: 80
+  num_workers: 8
   
 model:
   unet_regr:
-    ckpt_path: ${paths.pretrained_models_dir}UNET_2mT.ckpt
+    ckpt_path: /home/chuongtnd/git-repo/Physically-conditioned-latent-diffusion-model-for-temperature/logs/train/runs/2026-03-14_09-57-02/checkpoints/last.ckpt
+    # ${paths.pretrained_models_dir}UNET_2mT.ckpt
 
 callbacks:
   model_checkpoint:
