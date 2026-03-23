@@ -18,8 +18,8 @@ data:
   target_vars:
     high_res: ['2mT']
   crop_size: 512
-  batch_size: 80
-  num_workers: 8
+  batch_size: 96
+  num_workers: 4
   
 model:
   unet_regr:

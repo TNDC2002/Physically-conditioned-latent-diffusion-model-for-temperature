@@ -27,4 +27,4 @@ sbatch \
     --wrap="cd $REPO_ROOT && \
             export PROJECT_ROOT=$REPO_ROOT && \
             export PYTHONPATH=$REPO_ROOT:\$PYTHONPATH && \
-            $REPO_ROOT/.venv/bin/python src/train.py experiment=downscaling_VAE_res_2mT paths.data_dir=$REPO_ROOT/LDM-downscaling/ callbacks.rich_progress_bar=null"
+            $REPO_ROOT/.venv/bin/python src/train.py experiment=downscaling_LDM_res_2mT paths.data_dir=$REPO_ROOT/LDM-downscaling/ callbacks.rich_progress_bar=null"

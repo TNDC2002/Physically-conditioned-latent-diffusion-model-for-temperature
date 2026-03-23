@@ -18,6 +18,7 @@ utils/__pycache__/
 
 # large executed notebooks (outputs)
 notebooks/models_inference_executed.ipynb
+*.backup
 
 # logs
 *.log

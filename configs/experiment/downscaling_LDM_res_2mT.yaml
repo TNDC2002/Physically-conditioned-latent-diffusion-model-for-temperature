@@ -16,22 +16,23 @@ data:
   target_vars:
     high_res: ['2mT']
   crop_size: 512
-  batch_size: 8
+  batch_size: 32
   num_workers: 2
   nn_lowres: False
 
 model:
+  use_ema: true  # default in LatentDiffusion is true
   pde_lambda: 0.1      # NEW: Weight for the PDE (mass conservation) loss term
   temp_pde_coef: .00000000001
   temp_energy_coef:  0
   pde_mode: "temp"   # or "uv" depending on the training goal
-  trainable_parts: ["denoiser.output_blocks", "autoencoder.decoder", "denoiser.middle_block"]  # NEW: specify submodules to train
+  #trainable_parts: ["denoiser.output_blocks", "autoencoder.decoder", "denoiser.middle_block"]  # NEW: specify submodules to train
   #trainable_parts: ["denoiser.output_blocks", "autoencoder.decoder"]
   #trainable_parts: ["autoencoder.decoder"]  # NEW: specify submodules to train
   autoencoder:
     unet_regr:
-      ckpt_path: ${paths.pretrained_models_dir}UNET_2mT.ckpt
-  ae_load_state_file: ${paths.pretrained_models_dir}VAE_residual_2mT.ckpt
+      ckpt_path: /home/chuongtnd/git-repo/Physically-conditioned-latent-diffusion-model-for-temperature/logs/train/runs/2026-03-14_09-57-02(UNET)/checkpoints/UNET_2mT.ckpt # ${paths.pretrained_models_dir}UNET_2mT.ckpt
+  ae_load_state_file: /home/chuongtnd/git-repo/Physically-conditioned-latent-diffusion-model-for-temperature/logs/train/runs/2026-03-19_04-15-11(VAE)/checkpoints/VAE_residual_2mT.ckpt # ${paths.pretrained_models_dir}VAE_residual_2mT.ckpt
 
 # Use local pretrained_models after running pretrained_models/download_pretrained_models.sh
-ckpt_path: ${paths.pretrained_models_dir}LDM_residual_2mT.ckpt
+# ckpt_path: ${paths.pretrained_models_dir}LDM_residual_2mT.ckpt
