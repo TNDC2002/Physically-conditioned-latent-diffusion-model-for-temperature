@@ -25,6 +25,8 @@ class AutoencoderKL(LightningModule):
         encoder, decoder, 
         kl_weight=0.01,     
         ae_flag=None,
+        ae_mode=None,
+        use_for=None,
         unet_regr=None,
         **kwargs
     ):
@@ -40,7 +42,11 @@ class AutoencoderKL(LightningModule):
         # self.log_var = nn.Parameter(torch.zeros(size=()))
         self.kl_weight = kl_weight
         self.ae_flag = ae_flag
+        self.ae_mode = ae_mode
+        self.use_for = use_for
+        self._mode_logged = False
         assert self.ae_flag in [None, 'residual', 'hres'], f'ae_flag {self.ae_flag} not recognized!!'
+        assert self.ae_mode in [None, "static_ctx"], f'ae_mode {self.ae_mode} not recognized!!'
         if self.ae_flag=='residual':
             assert unet_regr is not None, 'If you want to work with residuals, provide a unet_regression network!'
         if unet_regr is not None:
@@ -129,6 +135,13 @@ class AutoencoderKL(LightningModule):
                 raise ValueError(f"Unexpected batch structure (len={len(batch)}). Expected 3 or 4 items.")
         else:
             raise TypeError(f"Unexpected batch type: {type(batch)}. Expected tuple/list.")
+        if not self._mode_logged:
+            print(f"[AutoencoderKL] preprocess route: ae_flag={self.ae_flag}, ae_mode={self.ae_mode}, use_for={self.use_for}")
+            self._mode_logged = True
+        if self.ae_mode == "static_ctx":
+            if smt is None:
+                raise ValueError("ae_mode=static_ctx requires static tensor in batch.")
+            return smt, smt
         if self.ae_flag is None:
             return low_res, high_res
         elif self.ae_flag == 'residual':
