@@ -15,7 +15,7 @@ class HrResidualMeanFlowLitModule(LightningModule):
         legacy_autoencoder,
         context_encoder=None,
         stage1_encoder_ckpt: Optional[str] = None,
-        freeze_stage1_encoder: bool = True,
+        freeze_stage1_encoder: bool = False,
         lr: float = 1e-4,
         lr_warmup: int = 0,
     ):
