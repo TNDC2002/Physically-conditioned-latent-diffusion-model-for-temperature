@@ -1,0 +1,23 @@
+# @package _global_
+
+defaults:
+  - override /model: meanflow_residual.yaml
+  - override /logger: tensorboard.yaml
+  - override /trainer: gpu.yaml
+
+tags: ["downscaling", "meanflow_res_2mT"]
+load_optimizer_state: false
+
+data:
+  target_vars:
+    high_res: ["2mT"]
+  crop_size: 512
+  batch_size: 32
+  num_workers: 2
+  nn_lowres: False
+
+model:
+  legacy_autoencoder:
+    unet_regr:
+      ckpt_path: /home/chuongtnd/git-repo/Physically-conditioned-latent-diffusion-model-for-temperature/logs/train/runs/2026-03-14_09-57-02(UNET)/checkpoints/UNET_2mT.ckpt
+  stage1_encoder_ckpt: /home/chuongtnd/git-repo/Physically-conditioned-latent-diffusion-model-for-temperature/logs/train/runs/2026-03-19_04-15-11(VAE)/checkpoints/VAE_residual_2mT.ckpt

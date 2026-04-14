@@ -1,0 +1,70 @@
+_target_: src.models.meanflow_module.HrResidualMeanFlowLitModule
+
+mf_unet:
+  _target_: src.models.components.ldm.denoiser.MFUNet
+  in_channels: 1
+  model_channels: 256
+  out_channels: 1
+  num_res_blocks: 2
+  attention_resolutions: [1, 2]
+  dims: 2
+  channel_mult: [1, 2, 4]
+  num_heads: 8
+  context_ch: [256, 512, 1024]
+  time_scale: 1000
+
+meanflow_core:
+  _target_: src.models.components.meanflow.meanflow_core.MeanFlowCore
+  flow_ratio: 0.5
+  time_dist: lognorm
+  time_mu: -0.4
+  time_sigma: 1.0
+
+legacy_autoencoder:
+  _target_: src.models.ae_module.AutoencoderKL
+  encoder:
+    _target_: src.models.components.ae.SimpleConvEncoder
+    levels: 3
+  decoder:
+    _target_: src.models.components.ae.SimpleConvDecoder
+    levels: 3
+  unet_regr:
+    _target_: src.models.unet_module.UnetLitModule
+    net:
+      _target_: src.models.components.unet.DownscalingUnet
+      in_ch: 32
+      out_ch: 1
+      features: [64, 128, 256, 512]
+    loss:
+      _target_: torch.nn.MSELoss
+      reduction: mean
+    optimizer: None
+  ae_flag: residual
+  ae_mode: static_ctx
+  use_for: meanflow_context_only
+
+context_encoder:
+  _target_: src.models.components.ldm.conditioner.AFNOConditionerNetCascade
+  autoencoder:
+    - _target_: src.models.ae_module.AutoencoderKL
+      encoder:
+        _target_: src.models.components.ae.SimpleConvEncoder
+        in_dim: 18
+        levels: 3
+        ch_mult: 3
+      decoder: None
+      ae_mode: static_ctx
+      use_for: meanflow_context_only
+    - _target_: src.models.ae_module.EncoderLRES
+  train_autoenc: true
+  cascade_depth: 3
+  embed_dim: [128, 24]
+  analysis_depth: [4, 4]
+  afno_fusion: true
+  input_size_ratios: [1, 1]
+  embed_dim_out: 256
+
+freeze_stage1_encoder: true
+stage1_encoder_ckpt: null
+lr: 1e-4
+lr_warmup: 0

@@ -34,3 +34,14 @@ def get_model_output(model_type, model, loaded_data, sampler = None, num_diffusi
             return result, ts_ns
         else:        
             return decoded_data, ts_ns
+    elif model_type == 'meanflow-residual':
+        low_res = loaded_data[0].to(device='cuda:0')
+        static = loaded_data[2].to(device='cuda:0')
+        ts_ns = loaded_data[3]
+        with torch.no_grad():
+            pred_final = model.predict_final(
+                low_res=low_res,
+                static=static,
+                y_shape=(low_res.shape[0], 1, static.shape[-2], static.shape[-1]),
+            ).cpu()
+        return pred_final, ts_ns
