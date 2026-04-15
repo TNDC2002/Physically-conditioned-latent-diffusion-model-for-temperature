@@ -127,12 +127,23 @@ class AutoencoderKL(LightningModule):
         # - (low_res, high_res, smt)  where smt is a static tensor (or other side input)
         # - (low_res, high_res, smt, ref_time) when ref_time is additionally provided
         if isinstance(batch, (list, tuple)):
-            if len(batch) == 3:
+            if len(batch) == 2:
+                # data.skip_dynamic_load: (static, ref_time) — no dynamic fields on device.
+                (smt, _ref_time) = batch
+                if self.ae_mode != "static_ctx":
+                    raise ValueError(
+                        "Two-item batches are produced when data.skip_dynamic_load=true; "
+                        f"use ae_mode=static_ctx (got ae_mode={self.ae_mode})."
+                    )
+                low_res, high_res = None, None
+            elif len(batch) == 3:
                 (low_res, high_res, smt) = batch
             elif len(batch) == 4:
                 (low_res, high_res, smt, _ref_time) = batch
             else:
-                raise ValueError(f"Unexpected batch structure (len={len(batch)}). Expected 3 or 4 items.")
+                raise ValueError(
+                    f"Unexpected batch structure (len={len(batch)}). Expected 2, 3, or 4 items."
+                )
         else:
             raise TypeError(f"Unexpected batch type: {type(batch)}. Expected tuple/list.")
         if not self._mode_logged:

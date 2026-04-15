@@ -45,7 +45,8 @@ class DownscalingDataModule(LightningDataModule):
         nn_lowres = True,
         static_vars: Dict[str, str] = None,
         crop_size: int = None,
-        metadata_file_name: str = 'metadata.csv'
+        metadata_file_name: str = 'metadata.csv',
+        skip_dynamic_load: bool = False,
     ):
         super().__init__()
 
@@ -68,8 +69,15 @@ class DownscalingDataModule(LightningDataModule):
         """
         # load and split datasets only if not loaded already
         if not self.data_train and not self.data_val and not self.data_test:
-            dataset = DownscalingDataset(self.hparams.data_dir, self.hparams.target_vars, self.hparams.nn_lowres, self.hparams.static_vars,
-                                       self.hparams.crop_size, self.hparams.metadata_file_name)
+            dataset = DownscalingDataset(
+                self.hparams.data_dir,
+                self.hparams.target_vars,
+                self.hparams.nn_lowres,
+                self.hparams.static_vars,
+                self.hparams.crop_size,
+                self.hparams.metadata_file_name,
+                self.hparams.skip_dynamic_load,
+            )
             self.data_train, self.data_val, self.data_test = random_split(
                 dataset=dataset,
                 lengths=[0.7, 0.15, 0.15],

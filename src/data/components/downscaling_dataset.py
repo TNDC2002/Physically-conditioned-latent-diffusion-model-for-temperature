@@ -15,7 +15,8 @@ class DownscalingDataset(Dataset):
     
     def __init__(self, dataset_dir: str, target_vars: dict, nn_lowres: bool = True,
                  static_vars: dict = None, crop_size: int = None,
-                 metadata_file_name = 'metadata.csv'):
+                 metadata_file_name = 'metadata.csv',
+                 skip_dynamic_load: bool = False):
         self.metadata_file_name = metadata_file_name
         self.dataset_dir = dataset_dir
         metadata_path = self.dataset_dir + self.metadata_file_name
@@ -30,6 +31,7 @@ class DownscalingDataset(Dataset):
         self.target_vars = target_vars
         self.nn_lowres = nn_lowres
         self.crop_size = crop_size
+        self.skip_dynamic_load = skip_dynamic_load
         if static_vars:
             self.static_vars = static_vars
             self.static_data = {}
@@ -47,32 +49,62 @@ class DownscalingDataset(Dataset):
             self.static_vars = static_vars
         self.res_list = ['low_res', 'high_res']
 
+        if self.skip_dynamic_load:
+            if not self.static_vars or self.nn_lowres:
+                raise ValueError(
+                    "skip_dynamic_load=True requires static_vars and nn_lowres=False "
+                    "(Stage-1 static AE: skip decompressing dynamic .pt.zst per sample)."
+                )
+            probe = self.read_data(0)
+            self._template_low = torch.zeros_like(self._stack_res_channels(probe, 'low_res'))
+            self._template_high = torch.zeros_like(self._stack_res_channels(probe, 'high_res'))
+            del probe
+
     def __len__(self) -> int:
         return len(self.metadata)
 
+    def _stack_res_channels(self, data: dict, res_type: str) -> torch.Tensor:
+        tensor_list = []
+        for var in self.target_vars[res_type]:
+            tensor = data[res_type][var]
+            if res_type == 'low_res' and self.nn_lowres:
+                tensor = torch.repeat_interleave(tensor, 8, dim=0)
+                tensor = torch.repeat_interleave(tensor, 8, dim=1)
+            if var == 'SST':
+                tensor = torch.nan_to_num(tensor, nan=-10)
+            tensor_list.append(tensor.to(torch.float32))
+        if self.static_vars and self.nn_lowres and res_type == 'low_res':
+            for s_v in self.static_data:
+                tensor_list.append(self.static_data[s_v].to(torch.float32))
+        return torch.stack(tensor_list)
+
+    def _stack_static_tensors(self) -> torch.Tensor:
+        tensor_list = []
+        for s_v in self.static_data:
+            tensor_list.append(self.static_data[s_v].to(torch.float32))
+        return torch.stack(tensor_list)
+
     def __getitem__(self, idx: int) -> Union[torch.Tensor, torch.Tensor, int]:
+        # MeanFlow Stage-1 (static_ctx AE): static fields are time-invariant; avoid loading
+        # dynamic low/high zstd tensors every step — only HR static rasters + random crop.
+        if self.skip_dynamic_load:
+            results_dict = {
+                'low_res': self._template_low,
+                'high_res': self._template_high,
+                'static': self._stack_static_tensors(),
+            }
+            if self.crop_size is not None:
+                results_dict, _ = self.random_crop(results_dict, self.crop_size)
+            return results_dict['static'], self.get_ref_time(idx)
+
         data = self.read_data(idx)
         results_dict = {}
         for res_type in self.res_list:
-            tensor_list = []  
-            for var in self.target_vars[res_type]:
-                if res_type == 'low_res' and self.nn_lowres:
-                    data[res_type][var] = torch.repeat_interleave(data[res_type][var], 8, dim=0)
-                    data[res_type][var] = torch.repeat_interleave(data[res_type][var], 8, dim=1)
-                if var == 'SST':
-                    data[res_type][var] = torch.nan_to_num(data[res_type][var], nan=-10)
-                tensor_list.append(data[res_type][var].to(torch.float32))
-            if self.static_vars and self.nn_lowres and res_type == 'low_res':
-                for s_v in self.static_data:
-                    tensor_list.append(self.static_data[s_v].to(torch.float32))
-            results_dict[res_type] = torch.stack(tensor_list)
+            results_dict[res_type] = self._stack_res_channels(data, res_type)
 
         # if you don't upscale LR but have static HRES vars, save them separetly! (==LDM conditioner)
         if self.static_vars and not self.nn_lowres:
-            tensor_list = []  
-            for s_v in self.static_data:
-                tensor_list.append(self.static_data[s_v].to(torch.float32))
-            results_dict['static'] = torch.stack(tensor_list)
+            results_dict['static'] = self._stack_static_tensors()
 
         if self.crop_size is not None:
             results_dict, cropping_info_list = self.random_crop(results_dict, self.crop_size)
@@ -187,7 +219,4 @@ class DownscalingDataset(Dataset):
         return tif_data
     
     def normalize(self, tensor: torch.tensor):
-        std = tensor.std()
-        if not torch.isfinite(std) or std < 1e-8:
-            return tensor - tensor.mean()
-        return (tensor - tensor.mean()) / std
+        return (tensor - tensor.mean()) / tensor.std()

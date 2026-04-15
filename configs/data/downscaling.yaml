@@ -1,0 +1,38 @@
+# @package data
+# Base data config for downscaling experiments.
+
+_target_: src.data.downscaling_datamodule.DownscalingDataModule
+data_dir: ${paths.data_dir}
+
+static_vars:
+  dtm_tif_file: ${paths.data_dir}/static_var/dtm_2km_domain_trim_EPSG3035.tif
+  lc_tif_file: ${paths.data_dir}/static_var/land_cover_classes_2km_domain_trim_EPSG3035.tif
+  lat_tif_file: ${paths.data_dir}/static_var/lat_2km_domain_trim_EPSG3035.tif
+
+target_vars:
+  low_res:
+    - 2mT
+    - PMSL
+    - U10
+    - V10
+    - dp2mT
+    - SST
+    - SNDPT
+    - TP
+    - SSRadIn
+    - Q850
+    - T850
+    - U850
+    - V850
+    - W850
+  high_res:
+    - 2mT
+
+batch_size: 8
+num_workers: 2
+pin_memory: true
+crop_size: 512
+nn_lowres: false
+# When true (Stage-1 static_ctx AE only): __getitem__ returns (static, ref_time) and skips
+# decompressing dynamic .pt.zst fields each step. LDM / MeanFlow training must keep false.
+skip_dynamic_load: false
