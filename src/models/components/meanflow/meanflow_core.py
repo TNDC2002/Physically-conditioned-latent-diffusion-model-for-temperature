@@ -57,5 +57,36 @@ class MeanFlowCore:
         delta = (t - r).view(-1, 1, 1, 1)
         return x_t - delta * u_theta
 
+    def meanflow_teacher(self, v_target: torch.Tensor, t: torch.Tensor, r: torch.Tensor, dudt: torch.Tensor):
+        delta = (t - r).view(-1, 1, 1, 1)
+        return v_target - delta * dudt
+
+    def compute_teacher_error(
+        self,
+        backbone_model,
+        x_t: torch.Tensor,
+        t: torch.Tensor,
+        r: torch.Tensor,
+        v_target: torch.Tensor,
+        create_graph: bool,
+    ):
+        # MeanFlow: u, dudt = jvp(fn, (z, r, t), (v, 0, 1))
+        u_theta, dudt = torch.autograd.functional.jvp(
+            backbone_model,
+            (x_t, r, t),
+            (v_target, torch.zeros_like(r), torch.ones_like(t)),
+            create_graph=create_graph,
+        )
+        u_tgt = self.meanflow_teacher(v_target, t, r, dudt)
+        return u_theta - u_tgt.detach()
+
+    def adaptive_l2_loss(self, error: torch.Tensor, gamma: float = 0.5, c: float = 1e-3):
+        # Follow upstream MeanFlow robust weighting:
+        # loss = stopgrad(w) * ||error||^2, w = 1 / (||error||^2 + c)^(1-gamma)
+        delta_sq = torch.mean(error ** 2, dim=(1, 2, 3), keepdim=False)
+        p = 1.0 - gamma
+        w = 1.0 / (delta_sq + c).pow(p)
+        return (w.detach() * delta_sq).mean()
+
     def residual_loss(self, r_hat: torch.Tensor, r_gt: torch.Tensor):
         return F.mse_loss(r_hat, r_gt)

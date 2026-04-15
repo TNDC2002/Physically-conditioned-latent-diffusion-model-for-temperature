@@ -13,8 +13,14 @@ Core direction:
 
 ## 1. Locked decisions from your clarification
 
-1. **Single-step generation objective**  
-   Use the equation form where \(x_0\) is the generated residual \(R\), produced in one calculation from the current state and \(U_\theta\).
+1. **JVP teacher objective (training) + single-step equation (inference)**  
+   Train with MeanFlow teacher target:
+   \[
+     u,\frac{du}{dt}=\mathrm{jvp}(f,(z,r,t),(v,0,1)),\quad
+     u_{tgt}=v-(t-r)\frac{du}{dt}
+   \]
+   and optimize `metric(u - stopgrad(u_tgt))`.  
+   Use one-step equation to produce \(\hat{R}\) at inference/evaluation time.
 
 2. **Stage-1 decoder usage**  
    The static autoencoder decoder is used only in Stage 1 to verify reconstruction quality, then not used in later stages.
@@ -70,7 +76,7 @@ The previous draft mixed `Z` and `z`; this section is canonical for the rest of 
 - MeanFlow core computes \(x_t\), \(t\), and \(r\) internally.
 - UNet backbone receives \((x_t, t, r, Z_{ctx})\) and predicts average velocity \(U_\theta\).
 - Use one-step equation to produce residual \(R\) from \(U_\theta\).
-- MeanFlow training loss in this scoped integration is residual-generation loss only (e.g. `L2`/`MSE`/chosen MeanFlow objective), with no PDE changes.
+- MeanFlow training loss in this scoped integration follows the JVP teacher objective above (e.g. adaptive-L2/MSE metric on `u - stopgrad(u_tgt)`), with no PDE changes.
 - Final prediction:
   \[
     \hat{y}_{final} = \hat{y}_{up} + \hat{R}
@@ -218,8 +224,12 @@ Acceptance checks:
    - build condition \(Z_{ctx}\): static encoder output + LR concat/fusion as current style
 3. Normalize \(R_{gt}\) with chosen residual normalizer.
 4. Let MeanFlow core generate internal \(x_t\), \(t\), \(r\), then call `mf_unet(x_t, t, r, context=Z_ctx)`.
-5. Compute one-step residual estimate \(\hat{R}\) from predicted velocity and MeanFlow equation.
-6. Train loss against \(R_{gt}\) using MeanFlow residual objective (`MSE`/`L2`/configured base).
+5. Compute JVP teacher target:
+   - `u, dudt = jvp(fn, (x_t, r, t), (v_target, 0, 1))`
+   - `u_tgt = v_target - (t-r) * dudt`
+6. Train loss as MeanFlow teacher objective:
+   - `loss = metric(u - stopgrad(u_tgt))` (adaptive-L2 by default, MSE optional)
+7. Keep one-step \(\hat{R}\) generation helper for inference/evaluation path.
 7. Keep optimizer/scheduler style close to current LDM settings for stable comparison.
 8. Keep Stage-2 UNet frozen; no grad updates outside Stage-3 path.
 
@@ -347,9 +357,11 @@ Use this as an execution contract for another coding agent.
   - compute `R_gt = y_hr - y_up`
   - build `Z_ctx` from static encoder + LR fusion
   - generate `x_t, t, r` via meanflow_core
+  - build `v_target` from bridge state (`noise - R_gt`)
   - call `u_theta = mf_unet(x_t, t, r, context=Z_ctx)`
-  - compute `R_hat` with single-step equation
-  - return residual loss(`R_hat`, `R_gt`)
+  - compute `dudt` with JVP using tangent `(v_target, 0, 1)`
+  - compute `u_tgt = v_target - (t-r)*dudt`
+  - return teacher loss `metric(u_theta - stopgrad(u_tgt))`
 
 3b. `src/models/ae_module.py` (or the active AE preprocessing location)
 - Add an explicit new mode for static-only encoding used by MeanFlow flow:
@@ -490,7 +502,7 @@ Implication:
 - [ ] `mf_unet.py` with `(x,t,r,context)` forward
 - [ ] explicit `t,r` embedding in `mf_unet.py` with configurable `time_scale`
 - [ ] new Stage-3 Lightning module for residual MeanFlow
-- [ ] MeanFlow loss implemented for residual generation only (`R_hat` vs `R_gt`)
+- [ ] MeanFlow JVP teacher loss implemented (`u - stopgrad(u_tgt)`), with one-step `R_hat` kept for inference
 - [ ] single-step MeanFlow inference helper
 - [ ] `inference_utils.py` new branch (`meanflow-residual`) with post-stage fusion
 - [ ] Hydra model + experiment configs

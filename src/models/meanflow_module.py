@@ -52,7 +52,7 @@ class HrResidualMeanFlowLitModule(LightningModule):
         zeros = torch.zeros((low_res.shape[0], 1), device=low_res.device, dtype=low_res.dtype)
         return self.context_encoder([(static, zeros), (low_res, zeros)])
 
-    def shared_step(self, batch):
+    def shared_step(self, batch, create_graph: bool):
         if len(batch) == 4:
             low_res, y_hr, static, _ = batch
         else:
@@ -68,20 +68,30 @@ class HrResidualMeanFlowLitModule(LightningModule):
         x_t = train_targets["x_t"]
         t = train_targets["t"]
         r = train_targets["r"]
+        v_target = train_targets["v_target"]
 
-        u_theta = self.mf_unet(x_t, t, r, context=z_ctx)
-        r_hat = self.meanflow_core.single_step_generate(x_t, t, r, u_theta)
-        loss = self.meanflow_core.residual_loss(r_hat, r_gt)
+        def UNET(x_state, time_r, time_t):
+            return self.mf_unet(x_state, time_t, time_r, context=z_ctx)
+
+
+        error = self.meanflow_core.compute_teacher_error(
+            backbone_model=UNET,
+            x_t=x_t,
+            t=t,
+            r=r,
+            v_target=v_target,
+            create_graph=create_graph,
+        )
+        loss = self.meanflow_core.adaptive_l2_loss(error)
         return loss
 
     def training_step(self, batch, batch_idx):
-        loss = self.shared_step(batch)
+        loss = self.shared_step(batch, create_graph=True)
         self.log("train/loss", loss, sync_dist=True)
         return loss
 
-    @torch.no_grad()
     def validation_step(self, batch, batch_idx):
-        loss = self.shared_step(batch)
+        loss = self.shared_step(batch, create_graph=False)
         self.log("val/loss", loss, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
 
     @torch.no_grad()

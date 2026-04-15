@@ -1,0 +1,44 @@
+# @package _global_
+
+# Stage-1 static context encoder training for MeanFlow pipeline
+# to execute this experiment run:
+# python src/train.py experiment=downscaling_VAE_static_2mT
+
+defaults:
+  - override /model: ae.yaml
+  - override /logger: tensorboard.yaml
+  - override /trainer: gpu.yaml
+
+tags: ["downscaling", "ae_static_ctx_2mT"]
+
+data:
+  # Inherit full target_vars from configs/data/downscaling.yaml (needed for shape probe).
+  skip_dynamic_load: true
+  crop_size: 512
+  batch_size: 16
+  num_workers: 4
+
+model:
+  encoder:
+    in_dim: 18
+    ch_mult: 4
+  decoder:
+    in_dim: 18
+
+  # Stage-1 for MeanFlow: route AE input/target to static HR only.
+  ae_mode: static_ctx
+  use_for: meanflow_context_only
+
+  # Keep Stage-1 independent from residual UNET path.
+  ae_flag: null
+  unet_regr: null
+
+callbacks:
+  model_checkpoint:
+    filename: "VAE_static_ctx_2mT_epoch_{epoch:03d}"
+    monitor: "val/rec_loss"
+
+  early_stopping:
+    monitor: "val/rec_loss"
+
+optimized_metric: val/rec_loss

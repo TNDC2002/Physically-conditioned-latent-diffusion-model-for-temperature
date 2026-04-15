@@ -219,4 +219,4 @@ class DownscalingDataset(Dataset):
         return tif_data
     
     def normalize(self, tensor: torch.tensor):
-        return (tensor - tensor.mean()) / tensor.std()
+        return (tensor - tensor.mean()) / (tensor.std() + 1e-10)

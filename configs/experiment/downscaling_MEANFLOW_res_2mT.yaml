@@ -21,3 +21,11 @@ model:
     unet_regr:
       ckpt_path: /home/chuongtnd/git-repo/Physically-conditioned-latent-diffusion-model-for-temperature/logs/train/runs/2026-03-14_09-57-02(UNET)/checkpoints/UNET_2mT.ckpt
   stage1_encoder_ckpt: /home/chuongtnd/git-repo/Physically-conditioned-latent-diffusion-model-for-temperature/logs/train/runs/2026-03-19_04-15-11(VAE)/checkpoints/VAE_residual_2mT.ckpt
+
+callbacks:
+  model_checkpoint:
+    filename: "MEANFLOW_res_2mT_epoch_{epoch:03d}"
+    monitor: "val/loss"
+
+  early_stopping:
+    monitor: "val/loss"
