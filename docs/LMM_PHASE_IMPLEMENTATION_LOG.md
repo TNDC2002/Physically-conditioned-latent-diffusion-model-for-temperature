@@ -72,4 +72,4 @@ MeanFlow sits on **latent `z_R`** with the same `preprocess_batch` → `encode` 
 
 ### Git checkpoint
 
-Git checkpoint: `e9a2fea` — `LMM phase L-J: initial LMM pipeline (module, configs, inference, tests)`.
+Git checkpoint: message `LMM phase L-J: initial LMM pipeline (module, configs, inference, tests)` — record `git rev-parse --short HEAD` here after your local commit if this file was merged without the hash line amended in.
