@@ -39,9 +39,10 @@ While LMM (and later pipeline **B** retirement) is rolled out:
    - **Block graph** (ASCII) of what is **actually implemented** after that phase — whole pipeline or **only the subgraph** this phase changed; use the same box/arrow style as Figures A–C in this plan; label **NEW** / **CHANGED** / **FROZEN** as appropriate.
    - **Placement note:** does the new/changed block connect where Figure **C** expects it?
    - **Gap note:** list any **missing** items vs that phase’s **Acceptance checks** here, or **mistakes** found when drawing the graph (drawing often exposes missing edges).
-3. **Do not** replace or erase older log sections — append only, so history remains reviewable.
+3. **Git checkpoint per phase:** when that log section (including its block graph) is finished, **commit** all work for that phase with a message that **names the phase id** first (e.g. `LMM phase L-D: <title>` or `LMM R-2: <title>`). Keep the commit scoped to that phase so you can **revert or `git bisect`** if something is wrong later.
+4. **Do not** replace or erase older log sections — append only, so history remains reviewable.
 
-**Rationale:** you can see **what landed**, **whether it sits in the right layer**, and **if something was forgotten**, without re-reading the whole codebase each phase.
+**Rationale:** you can see **what landed**, **whether it sits in the right layer**, and **if something was forgotten**, without re-reading the whole codebase each phase; paired commits give a **one-to-one** trail from phase → tree state.
 
 ---
 
@@ -166,7 +167,7 @@ Each phase uses the same subsection pattern as that plan: **What** / **How** / *
 
 Phases are labeled **L-A … L-K** (“L” = latent / LMM) to avoid confusion with the existing MeanFlow plan’s **A–H** (pixel fork).
 
-**Global acceptance (every phase L-A … L-K):** append one section to [`LMM_PHASE_IMPLEMENTATION_LOG.md`](./LMM_PHASE_IMPLEMENTATION_LOG.md) per **Requirements — phase block diagram log** above before closing the phase.
+**Global acceptance (every phase L-A … L-K):** append one section to [`LMM_PHASE_IMPLEMENTATION_LOG.md`](./LMM_PHASE_IMPLEMENTATION_LOG.md) per **Requirements — phase block diagram log** above, then make the **git checkpoint** commit for that phase, before closing the phase.
 
 ---
 
@@ -402,7 +403,7 @@ Phases are labeled **L-A … L-K** (“L” = latent / LMM) to avoid confusion w
 
 ## Deliverables checklist (LMM) — maps to phases above
 
-- [ ] **[`LMM_PHASE_IMPLEMENTATION_LOG.md`](./LMM_PHASE_IMPLEMENTATION_LOG.md)** exists and stays updated (**Requirements — phase block diagram log** + **R-*** entries).
+- [ ] **[`LMM_PHASE_IMPLEMENTATION_LOG.md`](./LMM_PHASE_IMPLEMENTATION_LOG.md)** exists and stays updated (**Requirements — phase block diagram log** + **R-*** entries + **git checkpoint** per phase).
 - [ ] **L-A** Scope doc + PDE decode-source decision recorded in yaml comments.
 - [ ] **L-B** Latent `MFUNet` forward + JVP smoke on latent-shaped tensors.
 - [ ] **L-C** New `LightningModule` file + successful Hydra instantiate.
@@ -517,7 +518,7 @@ This is **not** “edit `HrResidualMeanFlowLitModule` in place to use latents”
 | Read first | Purpose |
 |------------|---------|
 | **This file** (`LMM_PIPELINE_PLAN.md`) | **TARGET:** LMM = LDM with MeanFlow denoiser on `z_R`. |
-| [`LMM_PHASE_IMPLEMENTATION_LOG.md`](./LMM_PHASE_IMPLEMENTATION_LOG.md) | **Mandatory** per-phase ASCII block graphs + gap notes (**L-A…L-K**, **R-1…R-5**). |
+| [`LMM_PHASE_IMPLEMENTATION_LOG.md`](./LMM_PHASE_IMPLEMENTATION_LOG.md) | **Mandatory** per-phase ASCII block graphs + gap notes (**L-A…L-K**, **R-1…R-5**), each closed by a **scoped git commit** (see **Requirements — phase block diagram log**). |
 | [MEANFLOW_CURRENT_IMPLEMENTATION_SURVEY.md](./MEANFLOW_CURRENT_IMPLEMENTATION_SURVEY.md) | **Current code** vs `MEANFLOW_INTEGRATION_PLAN.md` + full file list (fork **B**). |
 | [README.md](../README.md) | **A** = legacy LDM; **B** = **current** pixel MeanFlow fork (mess). |
 | [MEANFLOW_INTEGRATION_PLAN.md](./MEANFLOW_INTEGRATION_PLAN.md) | Original phased plan; **Core direction** updated to distinguish implemented fork vs LMM. |
