@@ -24,6 +24,9 @@ class AutoencoderKL(LightningModule):
         self, 
         encoder, decoder, 
         kl_weight=0.01,     
+        lr: float = 1e-3,
+        logvar_min: float = None,
+        logvar_max: float = None,
         ae_flag=None,
         ae_mode=None,
         use_for=None,
@@ -41,6 +44,9 @@ class AutoencoderKL(LightningModule):
             kernel_size=1)
         # self.log_var = nn.Parameter(torch.zeros(size=()))
         self.kl_weight = kl_weight
+        self.lr = lr
+        self.logvar_min = logvar_min
+        self.logvar_max = logvar_max
         self.ae_flag = ae_flag
         self.ae_mode = ae_mode
         self.use_for = use_for
@@ -67,6 +73,10 @@ class AutoencoderKL(LightningModule):
 
     def forward(self, input, sample_posterior=True):
         (mean, log_var) = self.encode(input)
+        if self.logvar_min is not None or self.logvar_max is not None:
+            min_v = self.logvar_min if self.logvar_min is not None else float("-inf")
+            max_v = self.logvar_max if self.logvar_max is not None else float("inf")
+            log_var = torch.clamp(log_var, min=min_v, max=max_v)
         if sample_posterior:
             z = sample_from_standard_normal(mean, log_var)
         else:
@@ -108,7 +118,7 @@ class AutoencoderKL(LightningModule):
         self.val_test_step(batch, batch_idx, split="test")
 
     def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(self.parameters(), lr=1e-3,
+        optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr,
             betas=(0.5, 0.9), weight_decay=1e-3)
         reduce_lr = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer, patience=3, factor=0.25, verbose=True

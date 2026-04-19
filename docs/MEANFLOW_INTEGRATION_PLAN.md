@@ -1,13 +1,15 @@
 # MeanFlow integration plan (locked scope, UNet backbone)
 
-This plan defines the implementation work to add a new MeanFlow-based residual branch while preserving the existing pipeline structure.
+**Engineering target (Latent Meanflow Model, LMM):** see [LMM_PIPELINE_PLAN.md](./LMM_PIPELINE_PLAN.md) — duplicate the **latent** `LDM_PDE + UNet` pipeline and **replace only the denoiser** with MeanFlow on `z_R`. [README.md](../README.md), **pipeline B**, documents the **current** pixel-space fork (`HrResidualMeanFlowLitModule`), not that target.
 
-Core direction:
+This plan defines the implementation work to add a new MeanFlow-based residual branch while preserving the existing pipeline structure. **Inventory of what was actually built vs this document:** [MEANFLOW_CURRENT_IMPLEMENTATION_SURVEY.md](./MEANFLOW_CURRENT_IMPLEMENTATION_SURVEY.md).
+
+Core direction (as **implemented** in this repo — README pipeline **B**):
 - Keep the existing **UNet upscaler block** as-is.
 - Add a **new MeanFlow flow in parallel** with legacy LDM flow (no overwrite).
 - Legacy **LDM_PDE + UNET** train and inference paths must remain available and unchanged.
 - Keep **UNet** (not DiT) as the MeanFlow backbone.
-- Scope of new flow change is limited to replacing **Denoiser + Decoder** with a single MeanFlow residual generator block.
+- Scope of the **implemented** fork: replace **LDM’s latent residual denoiser + decode of \(z_R\)** (for the correction) with a **single MeanFlow generator acting on pixel-space** \(R_{gt}=y-\hat{y}_{up}\) (see `HrResidualMeanFlowLitModule`). That is **not** the same as “only swap the latent denoiser while keeping `Encoder_S1`/`Decoder_S1` on \(R\)” — that latter goal is **LMM** in [LMM_PIPELINE_PLAN.md](./LMM_PIPELINE_PLAN.md). A detailed inventory vs this document is in [MEANFLOW_CURRENT_IMPLEMENTATION_SURVEY.md](./MEANFLOW_CURRENT_IMPLEMENTATION_SURVEY.md).
 
 ---
 
@@ -415,7 +417,7 @@ Definition of done:
 ## 6.3 Suggested handoff prompt (copy/paste)
 
 ```text
-Implement MeanFlow residual branch according to MEANFLOW_INTEGRATION_PLAN.md.
+Implement MeanFlow residual branch according to docs/MEANFLOW_INTEGRATION_PLAN.md.
 Hard constraints:
 1) Keep Stage-2 UNet upscaler unchanged and frozen.
 2) Add MeanFlow as a new parallel flow; do NOT remove/overwrite legacy LDM_PDE+UNET.

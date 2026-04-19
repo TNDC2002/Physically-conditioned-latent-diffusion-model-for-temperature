@@ -19,6 +19,9 @@ data:
   num_workers: 4
 
 model:
+  lr: 1e-4
+  logvar_min: -20.0
+  logvar_max: 20.0
   encoder:
     in_dim: 18
     ch_mult: 4
@@ -42,3 +45,7 @@ callbacks:
     monitor: "val/rec_loss"
 
 optimized_metric: val/rec_loss
+
+trainer:
+  gradient_clip_val: 1.0
+  gradient_clip_algorithm: norm

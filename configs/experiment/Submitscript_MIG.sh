@@ -7,9 +7,10 @@ REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 LOG_DIR="${LOG_DIR:-$REPO_ROOT/slurm_logs}"
 PARTITION="${PARTITION:-mig}"
 GPU_TYPE="${GPU_TYPE:-nvidia_h100_80gb_hbm3_3g.40gb}"
-MEM="${MEM:-64G}"
+MEM="${MEM:-32G}"
 CPUS_PER_TASK="${CPUS_PER_TASK:-1}"
 TIME="${TIME:-12:00:00}"
+CKPT_PATH="${CKPT_PATH:-$REPO_ROOT/logs/train/runs/2026-04-15_13-51-02/checkpoints/last.ckpt}"
 
 mkdir -p "$LOG_DIR"
 
@@ -20,7 +21,7 @@ sbatch \
     --cpus-per-task="$CPUS_PER_TASK" \
     --partition="$PARTITION" \
     --gres=gpu:${GPU_TYPE}:1 \
-    --time="$TIME" \
+    --time=0 \
     --output="$LOG_DIR/%x-%j.out" \
     --error="$LOG_DIR/%x-%j.err" \
     --wrap="cd $REPO_ROOT && \
@@ -28,6 +29,7 @@ sbatch \
             export PYTHONPATH=$REPO_ROOT:\$PYTHONPATH && \
             $REPO_ROOT/.venv/bin/python src/train.py \
                     experiment=downscaling_VAE_static_2mT_MIG \
+                    ckpt_path=$CKPT_PATH \
                     trainer.max_epochs=100 \
                     paths.data_dir=$REPO_ROOT/LDM-downscaling/full_Dataset/ \
                     callbacks.rich_progress_bar=null"

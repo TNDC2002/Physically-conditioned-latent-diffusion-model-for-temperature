@@ -1,6 +1,6 @@
 # MeanFlow 3-Stage Training Guide
 
-This guide explains how to run the new MeanFlow flow in 3 stages while keeping the legacy `LDM_PDE + UNET` flow unchanged.
+This guide explains how to run the **current** pixel-residual MeanFlow fork (README pipeline **B**, `HrResidualMeanFlowLitModule`) in three stages while keeping the legacy `LDM_PDE + UNET` flow unchanged. For the **target** **Latent Meanflow Model (LMM)** — same **latent** Stage‑2 as LDM, **only** the denoiser swapped for MeanFlow on `z_R` — see **[LMM_PIPELINE_PLAN.md](./LMM_PIPELINE_PLAN.md)**.
 
 ## Scope and Goal
 
