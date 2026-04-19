@@ -71,4 +71,5 @@ MeanFlow sits on **latent `z_R`** with the same `preprocess_batch` → `encode` 
 
 ### Git checkpoint
 
-Git checkpoint: message `LMM phase L-J: initial LMM pipeline (module, configs, inference, tests)` — record `git rev-parse --short HEAD` here after your local commit if this file was merged without the hash line amended in.
+- L-J (initial pipeline): see earlier checkpoint message in git history.
+- L-K (smoke / parity / MIG): `7119558` — `LMM phase L-K: GPU-only smoke suite, MIG submit, shared latent path`.
