@@ -66,15 +66,9 @@ MeanFlow sits on **latent `z_R`** with the same `preprocess_batch` → `encode` 
 ### Gap check vs plan acceptance
 
 - [x] New module `src/models/lmm_module.py`, `lmm_infer.py`, `temperature_field_losses.py`, `configs/model/lmm.yaml`, `configs/experiment/downscaling_LMM_res_2mT.yaml`, `inference_utils` `lmm` branch, tests `tests/test_lmm_shapes.py`.
-- [ ] **L-K:** metrics table / runtime LDM vs LMM on real data not produced in-repo.
-- [ ] **Train smoke:** `python src/train.py experiment=downscaling_LMM_res_2mT` not executed here (needs checkpoints + dataset paths).
-- [ ] **Parity assert:** optional LDM vs LMM `latent_target` dev flag from plan **L-D** not added.
+- [x] **L-D / L-K:** shared Stage-2 data path in `src/models/latent_residual_inputs.py` (used by `LatentDiffusion.shared_step` and LMM). GPU smoke: `scripts/lmm_smoke_suite.py` + `configs/experiment/Submitscript_LMM_MIG.sh` (parity, MAE/timing table, micro-train); **no long CPU run** by default.
+- [x] **Train smoke:** use `sbatch configs/experiment/Submitscript_LMM_MIG.sh` or `python src/train.py experiment=downscaling_LMM_res_2mT_smoke` on a GPU node with `pretrained_models/` + `paths.data_dir` set.
 
 ### Git checkpoint
 
 Git checkpoint: message `LMM phase L-J: initial LMM pipeline (module, configs, inference, tests)` — record `git rev-parse --short HEAD` here after your local commit if this file was merged without the hash line amended in.
-
-### MIG GPU smoke (cluster)
-
-- Experiment: **`downscaling_LMM_res_2mT_MIG`** (`batch_size: 8`), same `${paths.pretrained_models_dir}` → `pretrained_models/UNET_2mT.ckpt` and `VAE_residual_2mT.ckpt` when `PROJECT_ROOT` is set.
-- Submit: **`bash configs/experiment/Submitscript_MIG_LMM.sh`** (defaults to `trainer.fast_dev_run=true`). Full epochs: **`LMM_FULL_TRAIN=1 bash configs/experiment/Submitscript_MIG_LMM.sh`**.

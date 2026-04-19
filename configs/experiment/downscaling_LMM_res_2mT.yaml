@@ -2,6 +2,7 @@
 #
 # Run: python src/train.py experiment=downscaling_LMM_res_2mT
 # MIG (smaller batch): experiment=downscaling_LMM_res_2mT_MIG — see Submitscript_MIG_LMM.sh
+# GPU smoke (parity + metrics + micro-train): sbatch configs/experiment/Submitscript_LMM_MIG.sh
 #
 # Point ``model.autoencoder.unet_regr.ckpt_path`` and ``model.ae_load_state_file`` to your
 # Stage-0 UNET and Stage-1 VAE checkpoints (see downscaling_LDM_res_2mT.yaml).

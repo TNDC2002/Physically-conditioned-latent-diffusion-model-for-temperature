@@ -1,0 +1,53 @@
+# @package _global_
+#
+# Short LMM run for **GPU** smoke (small crop, few steps). Full parity + metrics + micro-train:
+#   sbatch configs/experiment/Submitscript_LMM_MIG.sh
+# (The suite skips heavy work on CPU-only machines unless ``LMM_SMOKE_ALLOW_CPU=1``.)
+
+defaults:
+  - override /model: lmm.yaml
+  - override /logger: null
+  - override /trainer: gpu.yaml
+  - override /callbacks: default.yaml
+
+tags: ["downscaling", "lmm_res_2mT", "smoke"]
+
+train: true
+test: false
+
+load_optimizer_state: false
+
+trainer:
+  max_epochs: 1
+  max_steps: 10
+  limit_train_batches: 4
+  limit_val_batches: 2
+  log_every_n_steps: 1
+
+data:
+  target_vars:
+    high_res: ["2mT"]
+  crop_size: 128
+  batch_size: 2
+  num_workers: 0
+  nn_lowres: false
+
+model:
+  use_ema: true
+  pde_lambda: 0.0
+  temp_pde_coef: 0.0
+  temp_energy_coef: 0.0
+  pde_mode: "temp"
+  temp_pde_num_supercells: 8
+  autoencoder:
+    unet_regr:
+      ckpt_path: ${paths.pretrained_models_dir}UNET_2mT.ckpt
+  ae_load_state_file: ${paths.pretrained_models_dir}VAE_residual_2mT.ckpt
+
+callbacks:
+  rich_progress_bar: null
+  early_stopping:
+    patience: 9999
+  model_checkpoint:
+    save_top_k: 1
+    save_last: true

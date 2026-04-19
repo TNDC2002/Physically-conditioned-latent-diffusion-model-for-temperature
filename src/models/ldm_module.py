@@ -8,6 +8,7 @@ from functools import partial
 from typing import List, Optional
 
 from .components.ldm.denoiser import LitEma
+from .latent_residual_inputs import build_latent_target_and_context_dict
 
 
 def extract_into_tensor(a, t, x_shape):
@@ -67,7 +68,9 @@ class LatentDiffusion(LightningModule):
         self.denoiser = denoiser
         self.autoencoder = autoencoder.requires_grad_(False)
         if ae_load_state_file is not None:
-            self.autoencoder.load_state_dict(torch.load(ae_load_state_file)["state_dict"])
+            self.autoencoder.load_state_dict(
+                torch.load(ae_load_state_file, map_location="cpu", weights_only=False)["state_dict"]
+            )
         self.conditional = (context_encoder is not None)
         self.context_encoder = context_encoder
         self.lr = lr
@@ -487,24 +490,9 @@ class LatentDiffusion(LightningModule):
         return self.p_losses(x, t, *args, **kwargs)
 
     def shared_step(self, batch):
-        (x, y, z, ts) = batch      # x: coarse input, y: high-res target, z: static, ts: time
-        assert not torch.any(torch.isnan(x)).item(), 'coarse input has NaNs'
-        assert not torch.any(torch.isnan(y)).item(), 'high-res target has NaNs'
-        assert not torch.any(torch.isnan(z)).item(), 'static has NaNs'
-        if self.autoencoder.ae_flag == 'residual':
-            residual, _ = self.autoencoder.preprocess_batch([x, y, z])
-            latent_target = self.autoencoder.encode(residual)[0]
-        else:
-            latent_target = self.autoencoder.encode(y)[0]   # returns mean ONLY!!!
-        # Build a context dictionary that always contains the coarse field as T_c.
-        context_dict = {"T_c": x}
-        if self.conditional:
-            encoder_context = self.context_encoder([(z, [0]), (x, [0])])
-            # If encoder_context is already a dict, merge it; otherwise, add it as an extra entry.
-            if isinstance(encoder_context, dict):
-                context_dict.update(encoder_context)
-            else:
-                context_dict["encoder_context"] = encoder_context
+        latent_target, context_dict = build_latent_target_and_context_dict(
+            self.autoencoder, self.context_encoder, self.conditional, batch
+        )
         return self(latent_target, context=context_dict)
 
     def training_step(self, batch, batch_idx):

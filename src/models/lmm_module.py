@@ -10,6 +10,7 @@ from lightning import LightningModule
 
 from .components.ldm.denoiser import LitEma
 from .components.ldm.denoiser.lmm_infer import generate_latent_one_step
+from .latent_residual_inputs import build_latent_target_and_context_dict
 from .temperature_field_losses import TemperatureFieldLosses
 
 
@@ -106,16 +107,11 @@ class LatentMeanFlowLitModule(LightningModule):
 
     def build_latent_and_context(self, batch):
         """Match ``LatentDiffusion.shared_step`` data construction (residual VAE path)."""
-        (x, y, z, _ts) = batch
-        assert self.autoencoder.ae_flag == "residual", "LMM v1 is defined for residual ``ae_flag`` only."
-        assert not torch.any(torch.isnan(x)).item(), "coarse input has NaNs"
-        assert not torch.any(torch.isnan(y)).item(), "high-res target has NaNs"
-        assert not torch.any(torch.isnan(z)).item(), "static has NaNs"
-
-        residual, _ = self.autoencoder.preprocess_batch([x, y, z])
-        latent_target = self.autoencoder.encode(residual)[0]
-        context_dict = self._build_context_dict(x, z)
-        return latent_target, context_dict
+        if self.autoencoder.ae_flag != "residual":
+            raise ValueError("LMM v1 is defined for residual ``ae_flag`` only.")
+        return build_latent_target_and_context_dict(
+            self.autoencoder, self.context_encoder, self.conditional, batch
+        )
 
     def _physics_addon(
         self,

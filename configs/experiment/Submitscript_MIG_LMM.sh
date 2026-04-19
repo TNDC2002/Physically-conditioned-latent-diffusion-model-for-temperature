@@ -8,6 +8,8 @@
 # Usage:
 #   bash configs/experiment/Submitscript_MIG_LMM.sh
 #
+# Parity + metrics + micro-train smoke (separate script): bash configs/experiment/Submitscript_LMM_MIG.sh
+#
 # Full training (disable one-batch smoke):
 #   LMM_FULL_TRAIN=1 bash configs/experiment/Submitscript_MIG_LMM.sh
 #
