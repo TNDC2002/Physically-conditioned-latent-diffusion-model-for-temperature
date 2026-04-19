@@ -1,17 +1,16 @@
 # @package _global_
 #
-# Run: python src/train.py experiment=downscaling_LMM_res_2mT
-# MIG (smaller batch): experiment=downscaling_LMM_res_2mT_MIG — see Submitscript_MIG_LMM.sh
+# LMM on a single H100 MIG slice (3g.40gb): smaller batch than full-GPU run.
+# Submit: bash configs/experiment/Submitscript_MIG_LMM.sh
 #
-# Point ``model.autoencoder.unet_regr.ckpt_path`` and ``model.ae_load_state_file`` to your
-# Stage-0 UNET and Stage-1 VAE checkpoints (see downscaling_LDM_res_2mT.yaml).
+# Local: PROJECT_ROOT=$PWD python src/train.py experiment=downscaling_LMM_res_2mT_MIG
 
 defaults:
   - override /model: lmm.yaml
   - override /logger: tensorboard.yaml
   - override /trainer: gpu.yaml
 
-tags: ["downscaling", "lmm_res_2mT"]
+tags: ["downscaling", "lmm_res_2mT", "mig"]
 
 load_optimizer_state: false
 
@@ -19,7 +18,7 @@ data:
   target_vars:
     high_res: ["2mT"]
   crop_size: 512
-  batch_size: 32
+  batch_size: 8
   num_workers: 2
   nn_lowres: false
 

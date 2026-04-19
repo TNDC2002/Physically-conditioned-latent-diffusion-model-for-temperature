@@ -73,3 +73,8 @@ MeanFlow sits on **latent `z_R`** with the same `preprocess_batch` → `encode` 
 ### Git checkpoint
 
 Git checkpoint: message `LMM phase L-J: initial LMM pipeline (module, configs, inference, tests)` — record `git rev-parse --short HEAD` here after your local commit if this file was merged without the hash line amended in.
+
+### MIG GPU smoke (cluster)
+
+- Experiment: **`downscaling_LMM_res_2mT_MIG`** (`batch_size: 8`), same `${paths.pretrained_models_dir}` → `pretrained_models/UNET_2mT.ckpt` and `VAE_residual_2mT.ckpt` when `PROJECT_ROOT` is set.
+- Submit: **`bash configs/experiment/Submitscript_MIG_LMM.sh`** (defaults to `trainer.fast_dev_run=true`). Full epochs: **`LMM_FULL_TRAIN=1 bash configs/experiment/Submitscript_MIG_LMM.sh`**.
