@@ -36,3 +36,7 @@ model:
 
 # Use local pretrained_models after running pretrained_models/download_pretrained_models.sh
 # ckpt_path: ${paths.pretrained_models_dir}LDM_residual_2mT.ckpt
+
+callbacks:
+  model_checkpoint:
+    filename: "LDM_res_2mT_epoch_{epoch:03d}"

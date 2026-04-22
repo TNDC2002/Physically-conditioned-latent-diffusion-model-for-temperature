@@ -28,6 +28,7 @@ model:
 
 callbacks:
   model_checkpoint:
+    filename: "VAE_res_2mT_epoch_{epoch:03d}"
     monitor: "val/rec_loss"
   
   early_stopping:

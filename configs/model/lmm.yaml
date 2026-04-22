@@ -29,7 +29,7 @@ meanflow_core:
 
 # If true, ``meanflow_core`` above is still instantiated by Hydra but ignored; training uses
 # ``MeanFlowPaperCore`` (``MeanFlow/loss.py`` math). Optional kwargs: ``meanflow_paper``.
-use_meanflow_paper_core: false
+use_meanflow_paper_core: true
 meanflow_paper: null
 
 autoencoder:

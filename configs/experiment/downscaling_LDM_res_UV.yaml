@@ -38,3 +38,7 @@ model:
 
 # Use local pretrained_models; note: Zenodo may provide file as LDM_residual_UV.ckpt (no " copy")
 ckpt_path: ${paths.pretrained_models_dir}LDM_residual_UV.ckpt
+
+callbacks:
+  model_checkpoint:
+    filename: "LDM_res_UV_epoch_{epoch:03d}"

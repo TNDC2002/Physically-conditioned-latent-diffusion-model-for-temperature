@@ -49,5 +49,6 @@ callbacks:
   early_stopping:
     patience: 9999
   model_checkpoint:
+    filename: "LMM_res_2mT_smoke_epoch_{epoch:03d}"
     save_top_k: 1
     save_last: true

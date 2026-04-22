@@ -23,3 +23,7 @@ data:
 ckpt_path: /home/chuongtnd/git-repo/Physically-conditioned-latent-diffusion-model-for-temperature/logs/train/runs/2026-03-14_06-45-07/checkpoints/last.ckpt
 trainer:
   max_epochs: 50
+
+callbacks:
+  model_checkpoint:
+    filename: "UNET_2mT_epoch_{epoch:03d}"

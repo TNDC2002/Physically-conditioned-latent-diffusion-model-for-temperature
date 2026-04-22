@@ -33,3 +33,7 @@ model:
     unet_regr:
       ckpt_path: ${paths.pretrained_models_dir}UNET_2mT.ckpt
   ae_load_state_file: ${paths.pretrained_models_dir}VAE_residual_2mT.ckpt
+
+callbacks:
+  model_checkpoint:
+    filename: "LMM_res_2mT_MIG_epoch_{epoch:03d}"

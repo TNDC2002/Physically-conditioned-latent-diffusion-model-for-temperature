@@ -9,7 +9,7 @@ defaults:
   - override /logger: tensorboard.yaml
   - override /trainer: gpu.yaml
 
-tags: ["downscaling", "ae_static_ctx_2mT"]
+tags: ["downscaling", "ae_static_ctx_2mT", "mig"]
 
 data:
   # Inherit full target_vars from configs/data/downscaling.yaml (needed for shape probe).
@@ -35,7 +35,7 @@ model:
 
 callbacks:
   model_checkpoint:
-    filename: "VAE_static_ctx_2mT_epoch_{epoch:03d}"
+    filename: "VAE_static_ctx_2mT_MIG_epoch_{epoch:03d}"
     monitor: "val/rec_loss"
 
   early_stopping:

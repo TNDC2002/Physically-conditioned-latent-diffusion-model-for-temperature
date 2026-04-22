@@ -7,7 +7,7 @@ class MeanFlowCore:
 
     def __init__(
         self,
-        flow_ratio: float = 0.5,
+        flow_ratio: float = 0.75,
         time_dist: str = "lognorm",
         time_mu: float = -0.4,
         time_sigma: float = 1.0,

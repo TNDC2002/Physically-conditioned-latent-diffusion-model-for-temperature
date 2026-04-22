@@ -22,5 +22,9 @@ model:
   net:
     out_ch: 2
 
+callbacks:
+  model_checkpoint:
+    filename: "UNET_UV_epoch_{epoch:03d}"
+
 # # if we want to resume training from a checkpoint
 # ckpt_path: '/home/gabriele/Documents/fbk/icsc/downscaling-hydra/logs/train/runs/2023-11-15_14-19-52/checkpoints/epoch_077.ckpt'
