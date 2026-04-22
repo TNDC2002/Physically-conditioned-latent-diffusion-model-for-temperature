@@ -9,7 +9,7 @@ cd "$SCRIPT_DIR"
 wget --no-check-certificate \
      --header="Host: zenodo.org" \
      --continue \
-     "https://localhost:8080/records/12941117/files/pretrained_models.zip?download=1" \
+     "https://zenodo.org/records/12941117/files/pretrained_models.zip?download=1" \
      -O pretrained_models.zip
 
 # unzip main pretrained models
@@ -20,6 +20,6 @@ rm pretrained_models.zip
 wget --no-check-certificate \
      --header="Host: zenodo.org" \
      --continue \
-     "https://localhost:8080/records/15460090/files/pde_loss_model_checkpoint.ckpt?download=1" \
+     "https://zenodo.org/records/15460090/files/pde_loss_model_checkpoint.ckpt?download=1" \
      -O pde_loss_model_checkpoint.ckpt
 

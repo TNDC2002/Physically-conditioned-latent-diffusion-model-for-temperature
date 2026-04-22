@@ -1,6 +1,7 @@
 import torch
 
 from src.models.components.meanflow.meanflow_core import MeanFlowCore
+from src.models.components.meanflow.meanflow_paper_core import MeanFlowPaperCore
 
 
 def test_sample_t_r_shapes_and_order():
@@ -51,3 +52,30 @@ def test_meanflow_teacher_and_adaptive_l2_are_finite():
     assert u_tgt.shape == v_target.shape
     loss = core.adaptive_l2_loss(torch.randn_like(v_target))
     assert torch.isfinite(loss)
+
+
+def test_paper_core_matches_public_api_smoke():
+    core = MeanFlowPaperCore()
+    t, r = core.sample_t_r(batch_size=4, device=torch.device("cpu"))
+    assert t.shape == (4,) and r.shape == (4,)
+    assert torch.all(t >= r)
+    x0 = torch.randn(2, 1, 8, 8)
+    out = core.compute_train_targets(x0)
+    assert out["v_target"].shape == x0.shape
+    loss = core.adaptive_l2_loss(torch.randn_like(x0))
+    assert torch.isfinite(loss)
+
+
+def test_paper_core_teacher_jvp_finite():
+    core = MeanFlowPaperCore()
+
+    def backbone(z, cur_r, cur_t):
+        return z * 0.1 + cur_r.view(-1, 1, 1, 1) + cur_t.view(-1, 1, 1, 1)
+
+    x_t = torch.randn(2, 1, 8, 8, requires_grad=True)
+    t = torch.rand(2, requires_grad=True)
+    r = torch.rand(2, requires_grad=True)
+    v = torch.randn_like(x_t)
+    err = core.compute_teacher_error(backbone, x_t, t, r, v, create_graph=False)
+    assert err.shape == x_t.shape
+    assert torch.isfinite(err).all()

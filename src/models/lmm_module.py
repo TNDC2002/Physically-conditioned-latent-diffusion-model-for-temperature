@@ -9,6 +9,7 @@ import torch
 from lightning import LightningModule
 
 from .components.ldm.denoiser import LitEma
+from .components.meanflow.meanflow_paper_core import MeanFlowPaperCore
 from .components.ldm.denoiser.lmm_infer import generate_latent_one_step
 from .latent_residual_inputs import build_latent_target_and_context_dict
 from .temperature_field_losses import TemperatureFieldLosses
@@ -34,6 +35,8 @@ class LatentMeanFlowLitModule(LightningModule):
         temp_pde_coef: float = 0.0,
         temp_energy_coef: float = 0.0,
         temp_pde_num_supercells: int = 8,
+        use_meanflow_paper_core: bool = False,
+        meanflow_paper: Optional[Dict[str, Any]] = None,
     ):
         super().__init__()
         self.save_hyperparameters(ignore=["mf_unet", "meanflow_core", "autoencoder", "context_encoder"])
@@ -47,7 +50,11 @@ class LatentMeanFlowLitModule(LightningModule):
         self.temp_energy_coef = float(temp_energy_coef)
         self.temp_pde_num_supercells = int(temp_pde_num_supercells)
 
-        self.meanflow_core = meanflow_core
+        self.meanflow_core = (
+            MeanFlowPaperCore(**(meanflow_paper or {}))
+            if use_meanflow_paper_core
+            else meanflow_core
+        )
         self.mf_unet = mf_unet
         self.autoencoder = autoencoder.requires_grad_(False)
         if ae_load_state_file is not None:

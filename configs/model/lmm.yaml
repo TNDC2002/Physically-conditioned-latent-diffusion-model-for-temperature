@@ -27,6 +27,11 @@ meanflow_core:
   time_mu: -0.4
   time_sigma: 1.0
 
+# If true, ``meanflow_core`` above is still instantiated by Hydra but ignored; training uses
+# ``MeanFlowPaperCore`` (``MeanFlow/loss.py`` math). Optional kwargs: ``meanflow_paper``.
+use_meanflow_paper_core: false
+meanflow_paper: null
+
 autoencoder:
   _target_: src.models.ae_module.AutoencoderKL
   encoder:

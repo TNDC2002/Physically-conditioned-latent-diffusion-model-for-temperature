@@ -16,7 +16,7 @@ mkdir -p "$LOG_DIR"
 
 # Submit the job to MIG partition with exactly 1 MIG device.
 sbatch \
-    --job-name="VAE_res_2mT_mig" \
+    --job-name="LMM_res_2mT_mig" \
     --mem="$MEM" \
     --cpus-per-task="$CPUS_PER_TASK" \
     --partition="$PARTITION" \
@@ -28,7 +28,7 @@ sbatch \
             export PROJECT_ROOT=$REPO_ROOT && \
             export PYTHONPATH=$REPO_ROOT:\$PYTHONPATH && \
             $REPO_ROOT/.venv/bin/python src/train.py \
-                    experiment=downscaling_VAE_static_2mT_MIG \
+                    experiment=downscaling_LMM_res_2mT_MIG \
                     ckpt_path=$CKPT_PATH \
                     trainer.max_epochs=100 \
                     paths.data_dir=$REPO_ROOT/LDM-downscaling/full_Dataset/ \

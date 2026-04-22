@@ -24,9 +24,9 @@ data:
 
 model:
   use_ema: true
-  pde_lambda: 0.0
-  temp_pde_coef: 0.0
-  temp_energy_coef: 0.0
+  pde_lambda: 0.1
+  temp_pde_coef: .00000000001
+  temp_energy_coef:  0
   pde_mode: "temp"
   temp_pde_num_supercells: 8
   autoencoder:

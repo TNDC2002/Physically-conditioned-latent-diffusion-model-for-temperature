@@ -32,8 +32,8 @@ def build_latent_target_and_context_dict(
     if autoencoder.ae_flag == "residual":
         residual, _ = autoencoder.preprocess_batch([x, y, z])
         latent_target = autoencoder.encode(residual)[0]
-    else:
-        latent_target = autoencoder.encode(y)[0]
+    # else:
+    #     latent_target = autoencoder.encode(y)[0]
 
     context_dict: Dict[str, Any] = {"T_c": x}
     if conditional:
