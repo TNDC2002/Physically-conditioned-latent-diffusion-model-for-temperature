@@ -114,7 +114,7 @@ class UnetLitModule(LightningModule):
         # update and log metrics
         # self.test_loss(loss)
         # self.test_acc(preds, targets)
-        self.log("test/loss", loss.item(), on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log("test/loss", loss.item(), on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
 
     def on_test_epoch_end(self):
         pass

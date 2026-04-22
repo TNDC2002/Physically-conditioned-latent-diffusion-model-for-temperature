@@ -497,7 +497,7 @@ class LatentDiffusion(LightningModule):
 
     def training_step(self, batch, batch_idx):
         loss = self.shared_step(batch)
-        self.log("train/loss", loss, sync_dist=True)
+        self.log("train/loss", loss, on_step=True, on_epoch=True, sync_dist=True)
         return loss
 
     @torch.no_grad()
@@ -505,7 +505,7 @@ class LatentDiffusion(LightningModule):
         loss = self.shared_step(batch)
         with self.ema_scope():
             loss_ema = self.shared_step(batch)
-        log_params = {"on_step": False, "on_epoch": True, "prog_bar": True}
+        log_params = {"on_step": True, "on_epoch": True, "prog_bar": True}
         self.log("val/loss", loss, **log_params, sync_dist=True)
         self.log("val/loss_ema", loss_ema, **log_params, sync_dist=True)
 
@@ -514,7 +514,7 @@ class LatentDiffusion(LightningModule):
         loss = self.shared_step(batch)
         with self.ema_scope():
             loss_ema = self.shared_step(batch)
-        log_params = {"on_step": False, "on_epoch": True, "prog_bar": True}
+        log_params = {"on_step": True, "on_epoch": True, "prog_bar": True}
         self.log("test/loss", loss, **log_params, sync_dist=True)
         self.log("test/loss_ema", loss_ema, **log_params, sync_dist=True)
 

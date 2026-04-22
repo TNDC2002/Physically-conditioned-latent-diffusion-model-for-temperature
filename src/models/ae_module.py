@@ -100,13 +100,13 @@ class AutoencoderKL(LightningModule):
 
     def training_step(self, batch, batch_idx):
         loss = self._loss(batch)[0]
-        self.log("train/train_loss", loss, sync_dist=True)
+        self.log("train/train_loss", loss, on_step=True, on_epoch=True, sync_dist=True)
         return loss
 
     @torch.no_grad()
     def val_test_step(self, batch, batch_idx, split="val"):
         (total_loss, rec_loss, kl_loss) = self._loss(batch)
-        log_params = {"on_step": False, "on_epoch": True, "prog_bar": True}
+        log_params = {"on_step": True, "on_epoch": True, "prog_bar": True}
         self.log(f"{split}/loss", total_loss, **log_params, sync_dist=True)
         self.log(f"{split}/rec_loss", rec_loss.mean(), **log_params, sync_dist=True)
         self.log(f"{split}/kl_loss", kl_loss, **log_params, sync_dist=True)

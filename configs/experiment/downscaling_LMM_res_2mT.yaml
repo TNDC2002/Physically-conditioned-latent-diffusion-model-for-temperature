@@ -20,7 +20,7 @@ data:
   target_vars:
     high_res: ["2mT"]
   crop_size: 512
-  batch_size: 32
+  batch_size: 16
   num_workers: 2
   nn_lowres: false
 

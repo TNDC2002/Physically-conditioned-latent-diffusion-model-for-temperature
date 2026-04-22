@@ -56,7 +56,7 @@ class UnetGANLitModule(LightningModule):
         self.toggle_optimizer(unet_opt)
         unetloss, log_dict_unet = self.loss(hr, hr_pred, optimizer_idx, self.global_step,
                                         last_layer=self.get_last_layer(), split="train")
-        self.log("unetgan_loss", unetloss, prog_bar=True, logger=False, on_step=True, on_epoch=False, sync_dist=True)
+        self.log("unetgan_loss", unetloss, prog_bar=True, logger=False, on_step=True, on_epoch=True, sync_dist=True)
         unet_opt.zero_grad()
         self.manual_backward(unetloss)
         unet_opt.step()
@@ -67,7 +67,7 @@ class UnetGANLitModule(LightningModule):
         self.toggle_optimizer(d_opt)
         discloss, log_dict_disc = self.loss(hr, hr_pred, optimizer_idx, self.global_step,
                                         last_layer=self.get_last_layer(), split="train")
-        self.log("disc_loss", discloss, prog_bar=True, logger=False, on_step=True, on_epoch=False, sync_dist=True)
+        self.log("disc_loss", discloss, prog_bar=True, logger=False, on_step=True, on_epoch=True, sync_dist=True)
         d_opt.zero_grad()
         self.manual_backward(discloss)
         d_opt.step()
@@ -88,9 +88,9 @@ class UnetGANLitModule(LightningModule):
                                         last_layer=self.get_last_layer(), split="val"+suffix)
         rec_loss = log_dict_unet[f"val{suffix}/rec_loss"]
         self.log(f"val{suffix}/rec_loss", rec_loss,
-                   prog_bar=True, logger=True, on_step=False, on_epoch=True, sync_dist=True)
+                   prog_bar=True, logger=True, on_step=True, on_epoch=True, sync_dist=True)
         self.log(f"val{suffix}/unetgan_loss", unetloss,
-                   prog_bar=True, logger=True, on_step=False, on_epoch=True, sync_dist=True)
+                   prog_bar=True, logger=True, on_step=True, on_epoch=True, sync_dist=True)
         del log_dict_unet[f"val{suffix}/rec_loss"]
         self.log_dict(log_dict_unet)
         self.log_dict(log_dict_disc)
@@ -127,9 +127,9 @@ class UnetGANLitModule(LightningModule):
                                         last_layer=self.get_last_layer(), split="test"+suffix)
         rec_loss = log_dict_unet[f"test{suffix}/rec_loss"]
         self.log(f"test{suffix}/rec_loss", rec_loss,
-                   prog_bar=True, logger=True, on_step=False, on_epoch=True, sync_dist=True)
+                   prog_bar=True, logger=True, on_step=True, on_epoch=True, sync_dist=True)
         self.log(f"test{suffix}/unetgan_loss", unetloss,
-                   prog_bar=True, logger=True, on_step=False, on_epoch=True, sync_dist=True)
+                   prog_bar=True, logger=True, on_step=True, on_epoch=True, sync_dist=True)
         del log_dict_unet[f"test{suffix}/rec_loss"]
         self.log_dict(log_dict_unet)
         self.log_dict(log_dict_disc)

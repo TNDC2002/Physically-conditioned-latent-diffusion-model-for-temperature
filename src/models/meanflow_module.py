@@ -87,12 +87,12 @@ class HrResidualMeanFlowLitModule(LightningModule):
 
     def training_step(self, batch, batch_idx):
         loss = self.shared_step(batch, create_graph=True)
-        self.log("train/loss", loss, sync_dist=True)
+        self.log("train/loss", loss, on_step=True, on_epoch=True, sync_dist=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
         loss = self.shared_step(batch, create_graph=False)
-        self.log("val/loss", loss, on_step=False, on_epoch=True, prog_bar=True, sync_dist=True)
+        self.log("val/loss", loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
 
     @torch.no_grad()
     def predict_residual(self, low_res, static, shape):
