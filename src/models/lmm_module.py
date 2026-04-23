@@ -195,8 +195,7 @@ class LatentMeanFlowLitModule(LightningModule):
         total_loss = mf_loss + phys
 
         with torch.no_grad():
-            metrics = self._compute_rmse_r2(u_pred=u_pred, u_tgt=u_tgt)
-            metrics["adaptive_l2"] = mf_loss.detach()
+            metrics = {}
             if self.use_meanflow_paper_core:
                 metrics["legacy_adaptive_l2"] = self._legacy_meanflow_core.adaptive_l2_loss(error.detach())
 
@@ -209,14 +208,11 @@ class LatentMeanFlowLitModule(LightningModule):
     def training_step(self, batch, batch_idx):
         loss, metrics = self.shared_step(batch, create_graph=True)
         self.log("train/loss", loss, on_step=True, on_epoch=True, sync_dist=True)
-        self.log("train/rmse", metrics["rmse"], on_step=True, on_epoch=True, sync_dist=True)
-        self.log("train/r2", metrics["r2"], on_step=True, on_epoch=True, sync_dist=True)
-        self.log("train/adaptive_l2", metrics["adaptive_l2"], on_step=True, on_epoch=True, sync_dist=True)
         if "legacy_adaptive_l2" in metrics:
             self.log(
                 "train/legacy_adaptive_l2",
                 metrics["legacy_adaptive_l2"],
-                on_step=True,
+                on_step=False,
                 on_epoch=True,
                 sync_dist=True,
             )
@@ -226,15 +222,9 @@ class LatentMeanFlowLitModule(LightningModule):
         loss, metrics = self.shared_step(batch, create_graph=False)
         with self.ema_scope():
             loss_ema, metrics_ema = self.shared_step(batch, create_graph=False)
-        log_params = {"on_step": True, "on_epoch": True, "prog_bar": True}
+        log_params = {"on_step": False, "on_epoch": True, "prog_bar": True}
         self.log("val/loss", loss, **log_params, sync_dist=True)
         self.log("val/loss_ema", loss_ema, **log_params, sync_dist=True)
-        self.log("val/rmse", metrics["rmse"], **log_params, sync_dist=True)
-        self.log("val/r2", metrics["r2"], **log_params, sync_dist=True)
-        self.log("val/adaptive_l2", metrics["adaptive_l2"], **log_params, sync_dist=True)
-        self.log("val/rmse_ema", metrics_ema["rmse"], **log_params, sync_dist=True)
-        self.log("val/r2_ema", metrics_ema["r2"], **log_params, sync_dist=True)
-        self.log("val/adaptive_l2_ema", metrics_ema["adaptive_l2"], **log_params, sync_dist=True)
         if "legacy_adaptive_l2" in metrics:
             self.log("val/legacy_adaptive_l2", metrics["legacy_adaptive_l2"], **log_params, sync_dist=True)
         if "legacy_adaptive_l2" in metrics_ema:
@@ -249,15 +239,9 @@ class LatentMeanFlowLitModule(LightningModule):
         loss, metrics = self.shared_step(batch, create_graph=False)
         with self.ema_scope():
             loss_ema, metrics_ema = self.shared_step(batch, create_graph=False)
-        log_params = {"on_step": True, "on_epoch": True, "prog_bar": True}
+        log_params = {"on_step": False, "on_epoch": True, "prog_bar": True}
         self.log("test/loss", loss, **log_params, sync_dist=True)
         self.log("test/loss_ema", loss_ema, **log_params, sync_dist=True)
-        self.log("test/rmse", metrics["rmse"], **log_params, sync_dist=True)
-        self.log("test/r2", metrics["r2"], **log_params, sync_dist=True)
-        self.log("test/adaptive_l2", metrics["adaptive_l2"], **log_params, sync_dist=True)
-        self.log("test/rmse_ema", metrics_ema["rmse"], **log_params, sync_dist=True)
-        self.log("test/r2_ema", metrics_ema["r2"], **log_params, sync_dist=True)
-        self.log("test/adaptive_l2_ema", metrics_ema["adaptive_l2"], **log_params, sync_dist=True)
         if "legacy_adaptive_l2" in metrics:
             self.log("test/legacy_adaptive_l2", metrics["legacy_adaptive_l2"], **log_params, sync_dist=True)
         if "legacy_adaptive_l2" in metrics_ema:

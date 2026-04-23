@@ -20,7 +20,7 @@ data:
   target_vars:
     high_res: ["2mT"]
   crop_size: 512
-  batch_size: 16
+  batch_size: 17
   num_workers: 2
   nn_lowres: false
 
@@ -39,3 +39,7 @@ model:
 callbacks:
   model_checkpoint:
     filename: "LMM_res_2mT_epoch_{epoch:03d}"
+    monitor: "val/loss_ema"
+    save_top_k: 1
+    save_last: true
+    every_n_epochs: 5

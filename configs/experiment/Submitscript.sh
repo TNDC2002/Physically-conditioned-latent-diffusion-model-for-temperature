@@ -15,6 +15,13 @@ CKPT_PATH="${CKPT_PATH:-$REPO_ROOT/logs/train/runs/2026-04-22_17-55-14/checkpoin
 # CKPT_PATH=null
 LOAD_OPTIMIZER_STATE="${LOAD_OPTIMIZER_STATE:-true}"  # true => resume epoch/optimizer/scheduler state
 
+# If resuming from a checkpoint, keep writing logs into the same Hydra run directory
+# so TensorBoard curves remain continuous across resumed attempts.
+RESUME_RUN_DIR=""
+if [[ "$CKPT_PATH" != "null" && -f "$CKPT_PATH" ]]; then
+    RESUME_RUN_DIR="$(dirname "$(dirname "$CKPT_PATH")")"
+fi
+
 mkdir -p "$LOG_DIR"
 
 # Submit the job (request H100 GPU(s); adjust GPU_TYPE if your cluster uses a different GRES name)
@@ -34,6 +41,8 @@ sbatch \
                     experiment=downscaling_LMM_res_2mT.yaml \
                     ckpt_path=$CKPT_PATH \
                     load_optimizer_state=$LOAD_OPTIMIZER_STATE \
+                    hydra.run.dir=${RESUME_RUN_DIR:-\${paths.log_dir}/\${task_name}/runs/\${now:%Y-%m-%d}_\${now:%H-%M-%S}} \
+                    logger.tensorboard.version='' \
                     trainer.max_epochs=100 \
                     paths.data_dir=$REPO_ROOT/LDM-downscaling/full_Dataset/ \
                     callbacks.rich_progress_bar=null"
