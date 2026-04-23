@@ -5,7 +5,7 @@ from .unet import UNetModel, linear, timestep_embedding
 
 
 class MFUNet(UNetModel):
-    """UNet backbone with separate embeddings for MeanFlow t and r."""
+    """UNet backbone with separate embeddings for MeanFlow t and (t-r)."""
 
     def __init__(self, *args, time_scale: float = 1000.0, separate_r_mlp: bool = False, **kwargs):
         super().__init__(*args, **kwargs)
@@ -24,7 +24,8 @@ class MFUNet(UNetModel):
     def forward(self, x_t, t, r, context=None):
         hs = []
         t_emb = timestep_embedding(t * self.time_scale, self.model_channels, repeat_only=False)
-        r_emb = timestep_embedding(r * self.time_scale, self.model_channels, repeat_only=False)
+        # Match MeanFlow paper/reference: second embedding uses delta time (t-r).
+        r_emb = timestep_embedding((t - r) * self.time_scale, self.model_channels, repeat_only=False)
         emb = self.time_embed(t_emb) + self.r_time_embed(r_emb)
 
         h = x_t.type(self.dtype)

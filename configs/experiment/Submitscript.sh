@@ -11,8 +11,9 @@ GPU_TYPE="${GPU_TYPE:-nvidia_h100_80gb_hbm3}"            # GRES name on this clu
 MEM="${MEM:-32G}"
 CPUS_PER_TASK="${CPUS_PER_TASK:-1}"
 TIME="${TIME:-12:00:00}"
-CKPT_PATH="${CKPT_PATH:-$REPO_ROOT/logs/train/runs/2026-04-22_05-45-02/checkpoints/last.ckpt}"
+CKPT_PATH="${CKPT_PATH:-$REPO_ROOT/logs/train/runs/2026-04-22_17-55-14/checkpoints/last.ckpt}"
 # CKPT_PATH=null
+LOAD_OPTIMIZER_STATE="${LOAD_OPTIMIZER_STATE:-true}"  # true => resume epoch/optimizer/scheduler state
 
 mkdir -p "$LOG_DIR"
 
@@ -32,6 +33,7 @@ sbatch \
             $REPO_ROOT/.venv/bin/python src/train.py \
                     experiment=downscaling_LMM_res_2mT.yaml \
                     ckpt_path=$CKPT_PATH \
+                    load_optimizer_state=$LOAD_OPTIMIZER_STATE \
                     trainer.max_epochs=100 \
                     paths.data_dir=$REPO_ROOT/LDM-downscaling/full_Dataset/ \
                     callbacks.rich_progress_bar=null"
