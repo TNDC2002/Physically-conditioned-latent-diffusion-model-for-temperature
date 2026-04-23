@@ -69,6 +69,7 @@ class MeanFlowCore:
         r: torch.Tensor,
         v_target: torch.Tensor,
         create_graph: bool,
+        return_details: bool = False,
     ):
         # MeanFlow: u, dudt = jvp(fn, (z, r, t), (v, 0, 1))
         u_theta, dudt = torch.autograd.functional.jvp(
@@ -78,7 +79,10 @@ class MeanFlowCore:
             create_graph=create_graph,
         )
         u_tgt = self.meanflow_teacher(v_target, t, r, dudt)
-        return u_theta - u_tgt.detach()
+        error = u_theta - u_tgt.detach()
+        if return_details:
+            return error, u_theta, u_tgt.detach()
+        return error
 
     def adaptive_l2_loss(self, error: torch.Tensor, gamma: float = 0.5, c: float = 1e-3):
         # Follow upstream MeanFlow robust weighting:

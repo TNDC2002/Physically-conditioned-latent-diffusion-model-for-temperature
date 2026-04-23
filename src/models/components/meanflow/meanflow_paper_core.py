@@ -126,6 +126,7 @@ class MeanFlowPaperCore:
         r: Tensor,
         v_target: Tensor,
         create_graph: bool,
+        return_details: bool = False,
     ):
         # Same primals/tangents as ``MeanFlow/loss.py`` non-CFG branch (lines 206–215); reference
         # uses ``torch.func.jvp`` and a separate ``u = model(...)`` — one ``jvp`` here matches that
@@ -142,7 +143,10 @@ class MeanFlowPaperCore:
             create_graph=create_graph,
         )
         u_target = self.meanflow_teacher(v_target, t, r, dudt)
-        return u_theta - u_target.detach()
+        error = u_theta - u_target.detach()
+        if return_details:
+            return error, u_theta, u_target.detach()
+        return error
 
     def adaptive_l2_loss(self, error: Tensor, gamma: float = 0.5, c: float = 1e-3):
         # Paper reference (``MeanFlow/loss.py``): per-sample sum of squared error + adaptive weights.

@@ -30,3 +30,6 @@ slurm_logs/
 DiffScaler/
 LDM-downscaling
 pretrained_models/wget-log
+
+# legacy
+legacy/

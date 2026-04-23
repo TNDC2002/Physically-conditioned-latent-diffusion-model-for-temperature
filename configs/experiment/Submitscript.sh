@@ -11,8 +11,8 @@ GPU_TYPE="${GPU_TYPE:-nvidia_h100_80gb_hbm3}"            # GRES name on this clu
 MEM="${MEM:-32G}"
 CPUS_PER_TASK="${CPUS_PER_TASK:-1}"
 TIME="${TIME:-12:00:00}"
-# CKPT_PATH="${CKPT_PATH:-$REPO_ROOT/logs/train/runs/2026-04-20_13-30-10/checkpoints/last.ckpt}"
-CKPT_PATH=null
+CKPT_PATH="${CKPT_PATH:-$REPO_ROOT/logs/train/runs/2026-04-22_05-45-02/checkpoints/last.ckpt}"
+# CKPT_PATH=null
 
 mkdir -p "$LOG_DIR"
 
