@@ -160,17 +160,18 @@ class LatentMeanFlowLitModule(LightningModule):
     @staticmethod
     def _compute_rmse_r2(u_pred: torch.Tensor, u_tgt: torch.Tensor) -> Dict[str, torch.Tensor]:
         with torch.no_grad():
-            pred_flat = u_pred.detach().reshape(-1).float().cpu().numpy()
-            tgt_flat = u_tgt.detach().reshape(-1).float().cpu().numpy()
-            pred_xr = xr.DataArray(pred_flat, dims=["points"])
-            tgt_xr = xr.DataArray(tgt_flat, dims=["points"])
+            pred_np = u_pred.detach().float().cpu().numpy()
+            tgt_np = u_tgt.detach().float().cpu().numpy()
+            dim_names = [f"dim_{i}" for i in range(pred_np.ndim)]
+            pred_xr = xr.DataArray(pred_np, dims=dim_names)
+            tgt_xr = xr.DataArray(tgt_np, dims=dim_names)
             rmse = torch.tensor(
                 float(xs.rmse(pred_xr, tgt_xr).item()),
                 device=u_pred.device,
                 dtype=u_pred.dtype,
             )
             r2 = torch.tensor(
-                float(xs.r2(pred_xr, tgt_xr, dim="points").item()),
+                float(xs.r2(pred_xr, tgt_xr).item()),
                 device=u_pred.device,
                 dtype=u_pred.dtype,
             )
