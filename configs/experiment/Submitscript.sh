@@ -11,20 +11,52 @@ GPU_TYPE="${GPU_TYPE:-nvidia_h100_80gb_hbm3}"            # GRES name on this clu
 MEM="${MEM:-64G}"
 CPUS_PER_TASK="${CPUS_PER_TASK:-12}"
 TIME="${TIME:-12:00:00}"
-RESUME_FROM_CHECKPOINT="${RESUME_FROM_CHECKPOINT:-false}"  # true => continue, false => train from scratch
-CKPT_PATH="${CKPT_PATH:-$REPO_ROOT/logs/train/runs/2026-04-22_17-55-14/checkpoints/last.ckpt}"
-LOAD_OPTIMIZER_STATE="${LOAD_OPTIMIZER_STATE:-true}"  # true => resume epoch/optimizer/scheduler state
+# Independent toggles:
+# - LOAD_FROM_CHECKPOINT: load model state from CKPT_PATH (ckpt_path=<path>).
+# - REUSE_RUN_DIR: reuse CKPT_PATH's run folder; otherwise create a new timestamped run folder.
+# These toggles are intentionally independent for clarity.
+LOAD_FROM_CHECKPOINT="${LOAD_FROM_CHECKPOINT:-false}"
+REUSE_RUN_DIR="${REUSE_RUN_DIR:-false}"
+CKPT_PATH="${CKPT_PATH:-$REPO_ROOT/logs/train/runs/2026-04-24_08-42-44/checkpoints/last.ckpt}"
+LOAD_OPTIMIZER_STATE="${LOAD_OPTIMIZER_STATE:-false}"  # true => restore optimizer/scheduler/epoch from checkpoint
 DATA_NUM_WORKERS="${DATA_NUM_WORKERS:-8}"
 
-# If resuming from a checkpoint, keep writing logs into the same Hydra run directory.
-# If training from scratch, force ckpt_path=null and use a new timestamped Hydra run dir.
-if [[ "$RESUME_FROM_CHECKPOINT" != "true" ]]; then
-    CKPT_PATH="null"
+# Normalize boolean-like values to strict true/false.
+to_bool() {
+    local v
+    v="$(echo "$1" | tr '[:upper:]' '[:lower:]')"
+    case "$v" in
+        true|1|yes|y) echo "true" ;;
+        false|0|no|n) echo "false" ;;
+        *)
+            echo "Invalid boolean value: '$1' (expected true/false, 1/0, yes/no)" >&2
+            exit 2
+            ;;
+    esac
+}
+
+LOAD_FROM_CHECKPOINT="$(to_bool "$LOAD_FROM_CHECKPOINT")"
+REUSE_RUN_DIR="$(to_bool "$REUSE_RUN_DIR")"
+LOAD_OPTIMIZER_STATE="$(to_bool "$LOAD_OPTIMIZER_STATE")"
+
+CKPT_ARG="null"
+if [[ "$LOAD_FROM_CHECKPOINT" == "true" ]]; then
+    if [[ ! -f "$CKPT_PATH" ]]; then
+        echo "Checkpoint file not found: $CKPT_PATH" >&2
+        exit 1
+    fi
+    CKPT_ARG="$CKPT_PATH"
+elif [[ "$LOAD_OPTIMIZER_STATE" == "true" ]]; then
+    echo "LOAD_OPTIMIZER_STATE=true requires LOAD_FROM_CHECKPOINT=true. Forcing false." >&2
     LOAD_OPTIMIZER_STATE="false"
 fi
 
 RESUME_RUN_DIR=""
-if [[ "$CKPT_PATH" != "null" && -f "$CKPT_PATH" ]]; then
+if [[ "$REUSE_RUN_DIR" == "true" ]]; then
+    if [[ "$LOAD_FROM_CHECKPOINT" != "true" ]]; then
+        echo "REUSE_RUN_DIR=true requires LOAD_FROM_CHECKPOINT=true (to infer run dir from CKPT_PATH)." >&2
+        exit 1
+    fi
     RESUME_RUN_DIR="$(dirname "$(dirname "$CKPT_PATH")")"
 fi
 
@@ -57,7 +89,7 @@ sbatch \
             export OMP_NUM_THREADS=1 && \
             $REPO_ROOT/.venv/bin/python src/train.py \
                     experiment=downscaling_LMM_res_2mT.yaml \
-                    ckpt_path=$CKPT_PATH \
+                    ckpt_path=$CKPT_ARG \
                     load_optimizer_state=$LOAD_OPTIMIZER_STATE \
                     hydra.run.dir=$HYDRA_RUN_DIR \
                     trainer.max_epochs=100 \

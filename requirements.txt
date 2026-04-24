@@ -28,6 +28,7 @@ geopandas>=0.14
 zstandard
 tensorboard
 xarray
+xskillscore
 rioxarray
 matplotlib>=3.10.0
 einops

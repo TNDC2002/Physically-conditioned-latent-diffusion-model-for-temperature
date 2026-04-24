@@ -6,8 +6,9 @@ from contextlib import contextmanager
 from typing import Any, Dict, List, Optional
 
 import torch
+import xarray as xr
+import xskillscore as xs
 from lightning import LightningModule
-from torchmetrics.functional import mean_squared_error, r2_score
 
 from .components.ldm.denoiser import LitEma
 from .components.meanflow.meanflow_core import MeanFlowCore
@@ -159,15 +160,20 @@ class LatentMeanFlowLitModule(LightningModule):
     @staticmethod
     def _compute_rmse_r2(u_pred: torch.Tensor, u_tgt: torch.Tensor) -> Dict[str, torch.Tensor]:
         with torch.no_grad():
-            # JVP outputs can be non-contiguous; torchmetrics MSE uses ``view`` internally.
-            # Ensure contiguous tensors before calling metric functions.
-            u_pred_c = u_pred.contiguous()
-            u_tgt_c = u_tgt.contiguous()
-            mse = mean_squared_error(u_pred_c, u_tgt_c)
-            rmse = torch.sqrt(mse + 1e-12)
-            y_true = u_tgt_c.reshape(u_tgt_c.shape[0], -1)
-            y_pred = u_pred_c.reshape(u_pred_c.shape[0], -1)
-            r2 = r2_score(y_pred, y_true, multioutput="uniform_average")
+            pred_flat = u_pred.detach().reshape(-1).float().cpu().numpy()
+            tgt_flat = u_tgt.detach().reshape(-1).float().cpu().numpy()
+            pred_xr = xr.DataArray(pred_flat, dims=["points"])
+            tgt_xr = xr.DataArray(tgt_flat, dims=["points"])
+            rmse = torch.tensor(
+                float(xs.rmse(pred_xr, tgt_xr).item()),
+                device=u_pred.device,
+                dtype=u_pred.dtype,
+            )
+            r2 = torch.tensor(
+                float(xs.r2(pred_xr, tgt_xr, dim="points").item()),
+                device=u_pred.device,
+                dtype=u_pred.dtype,
+            )
         return {"rmse": rmse, "r2": r2}
 
     def _meanflow_train_loss(self, z0: torch.Tensor, context: Dict[str, Any], create_graph: bool):
@@ -195,7 +201,7 @@ class LatentMeanFlowLitModule(LightningModule):
         total_loss = mf_loss + phys
 
         with torch.no_grad():
-            metrics = {}
+            metrics = self._compute_rmse_r2(u_pred, u_tgt)
             if self.use_meanflow_paper_core:
                 metrics["legacy_adaptive_l2"] = self._legacy_meanflow_core.adaptive_l2_loss(error.detach())
 
@@ -207,7 +213,9 @@ class LatentMeanFlowLitModule(LightningModule):
 
     def training_step(self, batch, batch_idx):
         loss, metrics = self.shared_step(batch, create_graph=True)
-        self.log("train/loss", loss, on_step=True, on_epoch=True, sync_dist=True)
+        self.log("train/loss", loss, on_step=False, on_epoch=True, sync_dist=True)
+        self.log("train/rmse", metrics["rmse"], on_step=False, on_epoch=True, sync_dist=True)
+        self.log("train/r2", metrics["r2"], on_step=False, on_epoch=True, sync_dist=True)
         if "legacy_adaptive_l2" in metrics:
             self.log(
                 "train/legacy_adaptive_l2",
@@ -225,15 +233,10 @@ class LatentMeanFlowLitModule(LightningModule):
         log_params = {"on_step": False, "on_epoch": True, "prog_bar": True}
         self.log("val/loss", loss, **log_params, sync_dist=True)
         self.log("val/loss_ema", loss_ema, **log_params, sync_dist=True)
+        self.log("val/rmse", metrics["rmse"], **log_params, sync_dist=True)
+        self.log("val/r2", metrics["r2"], **log_params, sync_dist=True)
         if "legacy_adaptive_l2" in metrics:
             self.log("val/legacy_adaptive_l2", metrics["legacy_adaptive_l2"], **log_params, sync_dist=True)
-        if "legacy_adaptive_l2" in metrics_ema:
-            self.log(
-                "val/legacy_adaptive_l2_ema",
-                metrics_ema["legacy_adaptive_l2"],
-                **log_params,
-                sync_dist=True,
-            )
 
     def test_step(self, batch, batch_idx):
         loss, metrics = self.shared_step(batch, create_graph=False)
@@ -242,15 +245,10 @@ class LatentMeanFlowLitModule(LightningModule):
         log_params = {"on_step": False, "on_epoch": True, "prog_bar": True}
         self.log("test/loss", loss, **log_params, sync_dist=True)
         self.log("test/loss_ema", loss_ema, **log_params, sync_dist=True)
+        self.log("test/rmse", metrics["rmse"], **log_params, sync_dist=True)
+        self.log("test/r2", metrics["r2"], **log_params, sync_dist=True)
         if "legacy_adaptive_l2" in metrics:
             self.log("test/legacy_adaptive_l2", metrics["legacy_adaptive_l2"], **log_params, sync_dist=True)
-        if "legacy_adaptive_l2" in metrics_ema:
-            self.log(
-                "test/legacy_adaptive_l2_ema",
-                metrics_ema["legacy_adaptive_l2"],
-                **log_params,
-                sync_dist=True,
-            )
 
     def on_train_batch_end(self, *args, **kwargs):
         if self.use_ema:
