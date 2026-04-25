@@ -6,8 +6,6 @@ from contextlib import contextmanager
 from typing import Any, Dict, List, Optional
 
 import torch
-import xarray as xr
-import xskillscore as xs
 from lightning import LightningModule
 
 from .components.ldm.denoiser import LitEma
@@ -160,21 +158,17 @@ class LatentMeanFlowLitModule(LightningModule):
     @staticmethod
     def _compute_rmse_r2(u_pred: torch.Tensor, u_tgt: torch.Tensor) -> Dict[str, torch.Tensor]:
         with torch.no_grad():
-            pred_np = u_pred.detach().float().cpu().numpy()
-            tgt_np = u_tgt.detach().float().cpu().numpy()
-            dim_names = [f"dim_{i}" for i in range(pred_np.ndim)]
-            pred_xr = xr.DataArray(pred_np, dims=dim_names)
-            tgt_xr = xr.DataArray(tgt_np, dims=dim_names)
-            rmse = torch.tensor(
-                float(xs.rmse(pred_xr, tgt_xr).item()),
-                device=u_pred.device,
-                dtype=u_pred.dtype,
-            )
-            r2 = torch.tensor(
-                float(xs.r2(pred_xr, tgt_xr).item()),
-                device=u_pred.device,
-                dtype=u_pred.dtype,
-            )
+            pred = u_pred.detach().float()
+            tgt = u_tgt.detach().float()
+            err = pred - tgt
+            rmse = torch.sqrt(torch.mean(err * err))
+            # Match current xs.r2(pred, tgt) semantics exactly:
+            # denominator uses variance of the first argument (pred).
+            ss_res = torch.sum(err * err)
+            ss_tot = torch.sum((pred - torch.mean(pred)) ** 2)
+            r2 = 1.0 - (ss_res / ss_tot)
+            rmse = rmse.to(device=u_pred.device, dtype=u_pred.dtype)
+            r2 = r2.to(device=u_pred.device, dtype=u_pred.dtype)
         return {"rmse": rmse, "r2": r2}
 
     def _meanflow_train_loss(self, z0: torch.Tensor, context: Dict[str, Any], create_graph: bool):
