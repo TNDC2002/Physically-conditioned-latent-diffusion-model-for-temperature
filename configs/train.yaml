@@ -48,6 +48,12 @@ compile: False
 # simply provide checkpoint path to resume training
 ckpt_path: null
 
+# resume-time controls:
+# - keep ckpt resume (optimizer+epoch restored) but optionally reset scheduler/LR before first batch
+reset_scheduler_on_resume: false
+reset_lr_to_default_on_resume: false
+reset_lr_default_value: null
+
 # seed for random number generators in pytorch, numpy and python.random
 seed: 42
 

@@ -17,6 +17,68 @@ log = utils.get_pylogger(__name__)
 torch.set_float32_matmul_precision('medium')
 
 
+def _reset_reduce_on_plateau_scheduler(scheduler) -> bool:
+    """Reset ReduceLROnPlateau internals to fresh state."""
+    class_name = scheduler.__class__.__name__
+    if class_name != "ReduceLROnPlateau":
+        return False
+
+    mode = getattr(scheduler, "mode", "min")
+    scheduler.best = float("inf") if mode == "min" else float("-inf")
+    if hasattr(scheduler, "num_bad_epochs"):
+        scheduler.num_bad_epochs = 0
+    if hasattr(scheduler, "cooldown_counter"):
+        scheduler.cooldown_counter = 0
+    if hasattr(scheduler, "last_epoch"):
+        scheduler.last_epoch = 0
+    if hasattr(scheduler, "_last_lr"):
+        scheduler._last_lr = [pg["lr"] for pg in scheduler.optimizer.param_groups]
+    return True
+
+
+class ResumeResetCallback(Callback):
+    """On resumed runs, optionally reset LR scheduler and LR before first train batch."""
+
+    def __init__(self, reset_scheduler: bool, reset_lr_to_default: bool, default_lr: Optional[float]) -> None:
+        super().__init__()
+        self.reset_scheduler = bool(reset_scheduler)
+        self.reset_lr_to_default = bool(reset_lr_to_default)
+        self.default_lr = default_lr
+        self._applied = False
+
+    def on_fit_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
+        if self._applied:
+            return
+
+        if self.reset_lr_to_default:
+            lr_target = self.default_lr
+            if lr_target is None:
+                lr_target = getattr(pl_module, "lr", None)
+            if lr_target is None:
+                raise ValueError(
+                    "reset_lr_to_default_on_resume=true but no default LR found in config/model."
+                )
+            for opt in trainer.optimizers:
+                for param_group in opt.param_groups:
+                    param_group["lr"] = float(lr_target)
+            log.info(f"Resume reset: restored optimizer state but set current LR to default={float(lr_target):.8g}")
+
+        if self.reset_scheduler:
+            reset_ok = 0
+            total = 0
+            for sched_cfg in trainer.lr_scheduler_configs:
+                scheduler = sched_cfg.scheduler
+                total += 1
+                if _reset_reduce_on_plateau_scheduler(scheduler):
+                    reset_ok += 1
+            if total > 0:
+                log.info(f"Resume reset: scheduler state reset for {reset_ok}/{total} schedulers")
+            else:
+                log.info("Resume reset: no schedulers attached to trainer")
+
+        self._applied = True
+
+
 @utils.task_wrapper
 def train(cfg: DictConfig) -> Tuple[dict, dict]:
     if cfg.get("seed"):
@@ -39,6 +101,14 @@ def train(cfg: DictConfig) -> Tuple[dict, dict]:
 
     log.info("Instantiating callbacks...")
     callbacks: List[Callback] = utils.instantiate_callbacks(cfg.get("callbacks"))
+    if cfg.get("reset_scheduler_on_resume", False) or cfg.get("reset_lr_to_default_on_resume", False):
+        callbacks.append(
+            ResumeResetCallback(
+                reset_scheduler=cfg.get("reset_scheduler_on_resume", False),
+                reset_lr_to_default=cfg.get("reset_lr_to_default_on_resume", False),
+                default_lr=cfg.get("reset_lr_default_value"),
+            )
+        )
 
     log.info("Instantiating loggers...")
     logger: List[Logger] = utils.instantiate_loggers(cfg.get("logger"))

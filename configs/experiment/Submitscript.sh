@@ -15,10 +15,14 @@ TIME="${TIME:-12:00:00}"
 # - LOAD_FROM_CHECKPOINT: load model state from CKPT_PATH (ckpt_path=<path>).
 # - REUSE_RUN_DIR: reuse CKPT_PATH's run folder; otherwise create a new timestamped run folder.
 # These toggles are intentionally independent for clarity.
-LOAD_FROM_CHECKPOINT="${LOAD_FROM_CHECKPOINT:-false}"
-REUSE_RUN_DIR="${REUSE_RUN_DIR:-false}"
-CKPT_PATH="${CKPT_PATH:-$REPO_ROOT/logs/train/runs/2026-04-24_08-42-44/checkpoints/last.ckpt}"
-LOAD_OPTIMIZER_STATE="${LOAD_OPTIMIZER_STATE:-false}"  # true => restore optimizer/scheduler/epoch from checkpoint
+LOAD_FROM_CHECKPOINT="${LOAD_FROM_CHECKPOINT:-true}"
+REUSE_RUN_DIR="${REUSE_RUN_DIR:-true}"
+CKPT_PATH="${CKPT_PATH:-$REPO_ROOT/logs/train/runs/2026-04-24_18-27-35/checkpoints/last.ckpt}"
+LOAD_OPTIMIZER_STATE="${LOAD_OPTIMIZER_STATE:-true}"  # true => restore optimizer/scheduler/epoch from checkpoint
+# When true (and LOAD_OPTIMIZER_STATE=true), keep resumed epoch+optimizer but reset scheduler state and LR.
+RESET_SCHEDULER_AND_LR="${RESET_SCHEDULER_AND_LR:-false}"
+# Optional explicit LR value for reset (if empty, falls back to model.lr from config).
+RESET_LR_VALUE="${RESET_LR_VALUE:-}"
 DATA_NUM_WORKERS="${DATA_NUM_WORKERS:-8}"
 
 # Normalize boolean-like values to strict true/false.
@@ -38,6 +42,7 @@ to_bool() {
 LOAD_FROM_CHECKPOINT="$(to_bool "$LOAD_FROM_CHECKPOINT")"
 REUSE_RUN_DIR="$(to_bool "$REUSE_RUN_DIR")"
 LOAD_OPTIMIZER_STATE="$(to_bool "$LOAD_OPTIMIZER_STATE")"
+RESET_SCHEDULER_AND_LR="$(to_bool "$RESET_SCHEDULER_AND_LR")"
 
 CKPT_ARG="null"
 if [[ "$LOAD_FROM_CHECKPOINT" == "true" ]]; then
@@ -49,6 +54,11 @@ if [[ "$LOAD_FROM_CHECKPOINT" == "true" ]]; then
 elif [[ "$LOAD_OPTIMIZER_STATE" == "true" ]]; then
     echo "LOAD_OPTIMIZER_STATE=true requires LOAD_FROM_CHECKPOINT=true. Forcing false." >&2
     LOAD_OPTIMIZER_STATE="false"
+fi
+
+if [[ "$RESET_SCHEDULER_AND_LR" == "true" && "$LOAD_OPTIMIZER_STATE" != "true" ]]; then
+    echo "RESET_SCHEDULER_AND_LR=true requires LOAD_OPTIMIZER_STATE=true. Forcing RESET_SCHEDULER_AND_LR=false." >&2
+    RESET_SCHEDULER_AND_LR="false"
 fi
 
 RESUME_RUN_DIR=""
@@ -91,8 +101,17 @@ sbatch \
                     experiment=downscaling_LMM_res_2mT.yaml \
                     ckpt_path=$CKPT_ARG \
                     load_optimizer_state=$LOAD_OPTIMIZER_STATE \
+                    reset_scheduler_on_resume=$RESET_SCHEDULER_AND_LR \
+                    reset_lr_to_default_on_resume=$RESET_SCHEDULER_AND_LR \
+                    reset_lr_default_value=${RESET_LR_VALUE:-null} \
                     hydra.run.dir=$HYDRA_RUN_DIR \
                     trainer.max_epochs=100 \
                     data.num_workers=$DATA_NUM_WORKERS \
                     paths.data_dir=$REPO_ROOT/LDM-downscaling/full_Dataset/ \
+                    optimized_metric=val/rmse \
+                    callbacks.early_stopping.monitor=val/rmse \
+                    callbacks.early_stopping.mode=min \
+                    callbacks.early_stopping.verbose=true \
+                    callbacks.model_checkpoint.monitor=val/rmse \
+                    callbacks.model_checkpoint.mode=min \
                     callbacks.rich_progress_bar=null"
