@@ -5,25 +5,34 @@ set -e
 # Example: DOWNLOAD_DIR=/mnt/LDM-downscaling bash Better_download_full_dataset.sh
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-DOWNLOAD_DIR="${DOWNLOAD_DIR:-$REPO_ROOT/LDM-downscaling}"
+DOWNLOAD_DIR="${DOWNLOAD_DIR:-$REPO_ROOT/LDM-downscaling/better_full_dataset}"
 
 mkdir -p "$DOWNLOAD_DIR"
 cd "$DOWNLOAD_DIR"
 
-# Function to download a file with robust options via SSH reverse proxy (zenodo.org -> localhost:8080)
+# Zenodo download mode:
+#   USE_ZENODO_SSH_PROXY=0 (default) — direct HTTPS to zenodo.org (no tunnel).
+#   USE_ZENODO_SSH_PROXY=1 — via SSH reverse proxy (zenodo.org -> localhost:8080, Host header).
+USE_ZENODO_SSH_PROXY="${USE_ZENODO_SSH_PROXY:-0}"
+
+# Function to download a file with robust options.
 # -c: continue partial download if file already exists
 download_file() {
     local url="$1"
     local outfile="$2"
     echo "Downloading $outfile ..."
 
-    # Replace domain in the URL to route through the SSH reverse proxy
-    local proxied_url="${url/https:\/\/zenodo.org/https:\/\/localhost:8080}"
-
-    wget --no-check-certificate \
-         --header="Host: zenodo.org" \
-         -c -t 0 --waitretry=5 --read-timeout=20 --timeout=30 \
-         "$proxied_url" -O "$outfile"
+    if [[ "${USE_ZENODO_SSH_PROXY}" == "1" ]]; then
+        # Route through the SSH reverse proxy (keep tunnel listening on localhost:8080)
+        local proxied_url="${url/https:\/\/zenodo.org/https:\/\/localhost:8080}"
+        wget --no-check-certificate \
+             --header="Host: zenodo.org" \
+             -c -t 0 --waitretry=5 --read-timeout=20 --timeout=30 \
+             "$proxied_url" -O "$outfile"
+    else
+        wget -c -t 0 --waitretry=5 --read-timeout=20 --timeout=30 \
+             "$url" -O "$outfile"
+    fi
 }
 
 # Download data files from Zenodo (into DOWNLOAD_DIR)

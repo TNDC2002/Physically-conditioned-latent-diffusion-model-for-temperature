@@ -16,10 +16,13 @@ class DownscalingDataset(Dataset):
     def __init__(self, dataset_dir: str, target_vars: dict, nn_lowres: bool = True,
                  static_vars: dict = None, crop_size: int = None,
                  metadata_file_name = 'metadata.csv',
-                 skip_dynamic_load: bool = False):
+                 skip_dynamic_load: bool = False,
+                 metadata_dir: str = None):
         self.metadata_file_name = metadata_file_name
         self.dataset_dir = dataset_dir
-        metadata_path = self.dataset_dir + self.metadata_file_name
+        # CSV may live on the LDM mount root while ``files_path_*`` tensors use ``dataset_dir`` (e.g. full_Dataset/).
+        self.metadata_dir = metadata_dir if metadata_dir is not None else dataset_dir
+        metadata_path = self.metadata_dir + self.metadata_file_name
         if not os.path.isfile(metadata_path):
             raise FileNotFoundError(
                 f"Dataset metadata not found: {metadata_path}\n"

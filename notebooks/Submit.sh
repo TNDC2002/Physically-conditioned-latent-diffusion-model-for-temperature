@@ -19,17 +19,31 @@ CPUS_PER_TASK="${CPUS_PER_TASK:-8}"
 TIME="${TIME:-0:00:00}"
 
 NOTEBOOK="${NOTEBOOK:-$REPO_ROOT/notebooks/models_inference.ipynb}"
+# Slurm stdout/stderr (match configs/experiment/Submitscript.sh → slurm_logs/)
+SLURM_LOG_DIR="${SLURM_LOG_DIR:-$REPO_ROOT/slurm_logs}"
 
 # Output with timestamp (avoid overwrite); path is relative to REPO_ROOT after job cds
 BASENAME=$(basename "$NOTEBOOK" .ipynb)
 OUTPUT_NOTEBOOK="outputs/${BASENAME}_$(date +%Y%m%d_%H%M%S).ipynb"
 
 echo "Submitting notebook job:"
-echo "  REPO_ROOT: $REPO_ROOT"
-echo "  Input:     $NOTEBOOK"
-echo "  Output:    $OUTPUT_NOTEBOOK"
+echo "  REPO_ROOT:     $REPO_ROOT"
+echo "  SLURM_LOG_DIR: $SLURM_LOG_DIR"
+echo "  Input:         $NOTEBOOK"
+echo "  Output:        $OUTPUT_NOTEBOOK"
 
-mkdir -p "$REPO_ROOT/logs" "$REPO_ROOT/outputs"
+mkdir -p "$SLURM_LOG_DIR" "$REPO_ROOT/outputs"
+
+# Dataset lives under the project mount: LDM-downscaling/full_Dataset/ (see training yaml paths.data_dir).
+# Override if your mount is elsewhere: LDM_DATA_ROOT=/path/to/full_Dataset bash notebooks/Submit.sh
+LDM_DATA_ROOT_DEFAULT="$REPO_ROOT/LDM-downscaling/full_Dataset"
+LDM_DATA_RESOLVED="${LDM_DATA_ROOT:-$LDM_DATA_ROOT_DEFAULT}"
+if [[ ! -f "$LDM_DATA_RESOLVED/normalization_data.pkl" ]]; then
+    echo "ERROR: Missing normalization_data.pkl under data root:" >&2
+    echo "  $LDM_DATA_RESOLVED" >&2
+    echo "Set LDM_DATA_ROOT to your full_Dataset directory, or ensure \$REPO_ROOT/LDM-downscaling/full_Dataset exists." >&2
+    exit 1
+fi
 
 # --- Submit job ---
 sbatch <<EOF
@@ -40,18 +54,20 @@ sbatch <<EOF
 #SBATCH --mem=$MEM
 #SBATCH --cpus-per-task=$CPUS_PER_TASK
 #SBATCH --time=$TIME
-#SBATCH --output=logs/%x-%j.out
-#SBATCH --error=logs/%x-%j.err
+#SBATCH --output=$SLURM_LOG_DIR/%x-%j.out
+#SBATCH --error=$SLURM_LOG_DIR/%x-%j.err
 
 set -euo pipefail
 echo "Running on node: \$(hostname)"
 
 cd "$REPO_ROOT"
-mkdir -p logs outputs
+mkdir -p "$SLURM_LOG_DIR" outputs
 
 export PROJECT_ROOT="$REPO_ROOT"
 export PYTHONPATH="$REPO_ROOT:\${PYTHONPATH:-}"
 export OMP_NUM_THREADS=1
+# Notebook reads this in \"Set paths\" (default: under project mount full_Dataset).
+export LDM_DATA_ROOT="${LDM_DATA_ROOT:-$REPO_ROOT/LDM-downscaling/full_Dataset}"
 
 source .venv/bin/activate
 

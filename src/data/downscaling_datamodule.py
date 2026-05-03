@@ -47,6 +47,7 @@ class DownscalingDataModule(LightningDataModule):
         crop_size: int = None,
         metadata_file_name: str = 'metadata.csv',
         skip_dynamic_load: bool = False,
+        metadata_dir: str = None,
     ):
         super().__init__()
 
@@ -77,6 +78,7 @@ class DownscalingDataModule(LightningDataModule):
                 self.hparams.crop_size,
                 self.hparams.metadata_file_name,
                 self.hparams.skip_dynamic_load,
+                getattr(self.hparams, "metadata_dir", None),
             )
             self.data_train, self.data_val, self.data_test = random_split(
                 dataset=dataset,
