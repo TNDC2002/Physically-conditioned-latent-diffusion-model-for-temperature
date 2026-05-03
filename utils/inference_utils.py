@@ -46,14 +46,11 @@ def get_model_output(model_type, model, loaded_data, sampler = None, num_diffusi
             ).cpu()
         return pred_final, ts_ns
     elif model_type == 'lmm':
-        low_res = loaded_data[0]
-        y_hr = loaded_data[1]
-        static = loaded_data[2]
+        dev = next(model.parameters()).device
+        low_res = loaded_data[0].to(dev)
+        y_hr = loaded_data[1].to(dev)
+        static = loaded_data[2].to(dev)
         ts_ns = loaded_data[3]
-        device = low_res.device
-        low_res = low_res.to(device=device)
-        y_hr = y_hr.to(device=device)
-        static = static.to(device=device)
         with torch.no_grad():
             pred_final = model.predict_final(low_res=low_res, static=static, y_hr=y_hr).cpu()
         return pred_final, ts_ns
