@@ -38,8 +38,13 @@ model:
 
 callbacks:
   model_checkpoint:
-    filename: "LMM_res_2mT_epoch_{epoch:03d}"
-    monitor: "val/loss_ema"
+    filename: "best_LMM_res_2mT_epoch_{epoch:03d}"
+    monitor: "val/control_score"
     save_top_k: 1
     save_last: true
-    every_n_epochs: 5
+    every_n_epochs: 1
+  early_stopping:
+    patience: 10
+    monitor: "val/control_score"
+    mode: "min"
+    verbose: true

@@ -76,6 +76,13 @@ lr: 1e-4
 lr_warmup: 0
 use_ema: true
 loss_type: l2
+# Composite control-score weights (shared by scheduler/early-stop/checkpoint):
+# val/loss, val/legacy_adaptive_l2, val/rmse, and (-val/r2), respectively.
+control_metric_weights:
+  loss: 1.0
+  legacy_adaptive_l2: 1.0
+  rmse: 1.0
+  r2: 1.0
 
 pde_lambda: 0.0
 pde_mode: "temp"

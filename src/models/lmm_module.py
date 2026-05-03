@@ -38,6 +38,8 @@ class LatentMeanFlowLitModule(LightningModule):
         temp_pde_num_supercells: int = 8,
         use_meanflow_paper_core: bool = False,
         meanflow_paper: Optional[Dict[str, Any]] = None,
+        control_metric_weights: Optional[Dict[str, float]] = None,
+        lr_scheduler_metric_weights: Optional[Dict[str, float]] = None,
     ):
         super().__init__()
         self.save_hyperparameters(ignore=["mf_unet", "meanflow_core", "autoencoder", "context_encoder"])
@@ -51,6 +53,17 @@ class LatentMeanFlowLitModule(LightningModule):
         self.temp_energy_coef = float(temp_energy_coef)
         self.temp_pde_num_supercells = int(temp_pde_num_supercells)
         self.use_meanflow_paper_core = bool(use_meanflow_paper_core)
+        self.control_metric_weights = {
+            "loss": 0.0,
+            "legacy_adaptive_l2": 0.0,
+            "rmse": 1.0,
+            "r2": 0.0,
+        }
+        if control_metric_weights is not None:
+            self.control_metric_weights.update({k: float(v) for k, v in control_metric_weights.items()})
+        # Backward compatibility with older configs.
+        if lr_scheduler_metric_weights is not None:
+            self.control_metric_weights.update({k: float(v) for k, v in lr_scheduler_metric_weights.items()})
 
         self.meanflow_core = (
             MeanFlowPaperCore(**(meanflow_paper or {}))
@@ -230,6 +243,19 @@ class LatentMeanFlowLitModule(LightningModule):
         self.log("val/loss_ema", loss_ema, **log_params, sync_dist=True)
         self.log("val/rmse", metrics["rmse"], **log_params, sync_dist=True)
         self.log("val/r2", metrics["r2"], **log_params, sync_dist=True)
+        # Composite control monitor used by scheduler/early-stop/checkpoint selection.
+        # Lower is better; better r2 reduces score via the negative sign.
+        legacy_l2 = metrics.get("legacy_adaptive_l2")
+        if legacy_l2 is None:
+            # Fallback for setups where legacy metric is not emitted.
+            legacy_l2 = torch.zeros_like(loss)
+        control_score = (
+            self.control_metric_weights["loss"] * loss
+            + self.control_metric_weights["legacy_adaptive_l2"] * legacy_l2
+            + self.control_metric_weights["rmse"] * metrics["rmse"]
+            - self.control_metric_weights["r2"] * metrics["r2"]
+        )
+        self.log("val/control_score", control_score, **log_params, sync_dist=True)
         if "legacy_adaptive_l2" in metrics:
             self.log("val/legacy_adaptive_l2", metrics["legacy_adaptive_l2"], **log_params, sync_dist=True)
 
@@ -252,7 +278,7 @@ class LatentMeanFlowLitModule(LightningModule):
     def configure_optimizers(self):
         trainable_params = [p for p in self.parameters() if p.requires_grad]
         optimizer = torch.optim.AdamW(trainable_params, lr=self.lr, betas=(0.5, 0.9), weight_decay=1e-3)
-        monitor = "val/loss_ema" if self.use_ema else "val/loss"
+        monitor = "val/control_score"
         reduce_lr = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer, patience=3, factor=0.25, verbose=True
         )

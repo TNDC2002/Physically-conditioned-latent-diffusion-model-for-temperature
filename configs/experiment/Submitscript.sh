@@ -10,19 +10,19 @@ NUM_GPUS="${NUM_GPUS:-1}"               # 1 H100 (80GB) for compute-limited; use
 GPU_TYPE="${GPU_TYPE:-nvidia_h100_80gb_hbm3}"            # GRES name on this cluster
 MEM="${MEM:-64G}"
 CPUS_PER_TASK="${CPUS_PER_TASK:-12}"
-TIME="${TIME:-12:00:00}"
+TIME="${TIME:-1200:00:00}"
 # Independent toggles:
 # - LOAD_FROM_CHECKPOINT: load model state from CKPT_PATH (ckpt_path=<path>).
 # - REUSE_RUN_DIR: reuse CKPT_PATH's run folder; otherwise create a new timestamped run folder.
 # These toggles are intentionally independent for clarity.
 LOAD_FROM_CHECKPOINT="${LOAD_FROM_CHECKPOINT:-true}"
 REUSE_RUN_DIR="${REUSE_RUN_DIR:-true}"
-CKPT_PATH="${CKPT_PATH:-$REPO_ROOT/logs/train/runs/2026-04-24_18-27-35/checkpoints/last.ckpt}"
+CKPT_PATH="${CKPT_PATH:-$REPO_ROOT/logs/train/runs/2026-04-24_18-27-35/checkpoints/last-v1.ckpt}"
 LOAD_OPTIMIZER_STATE="${LOAD_OPTIMIZER_STATE:-true}"  # true => restore optimizer/scheduler/epoch from checkpoint
 # When true (and LOAD_OPTIMIZER_STATE=true), keep resumed epoch+optimizer but reset scheduler state and LR.
 RESET_SCHEDULER_AND_LR="${RESET_SCHEDULER_AND_LR:-false}"
 # Optional explicit LR value for reset (if empty, falls back to model.lr from config).
-RESET_LR_VALUE="${RESET_LR_VALUE:-}"
+RESET_LR_VALUE="${RESET_LR_VALUE:-1e-4}"
 DATA_NUM_WORKERS="${DATA_NUM_WORKERS:-8}"
 
 # Normalize boolean-like values to strict true/false.
@@ -108,10 +108,10 @@ sbatch \
                     trainer.max_epochs=100 \
                     data.num_workers=$DATA_NUM_WORKERS \
                     paths.data_dir=$REPO_ROOT/LDM-downscaling/full_Dataset/ \
-                    optimized_metric=val/rmse \
-                    callbacks.early_stopping.monitor=val/rmse \
+                    optimized_metric=val/control_score \
+                    callbacks.early_stopping.monitor=val/control_score \
                     callbacks.early_stopping.mode=min \
                     callbacks.early_stopping.verbose=true \
-                    callbacks.model_checkpoint.monitor=val/rmse \
+                    callbacks.model_checkpoint.monitor=val/control_score \
                     callbacks.model_checkpoint.mode=min \
                     callbacks.rich_progress_bar=null"

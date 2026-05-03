@@ -5,6 +5,7 @@ import lightning as L
 import pyrootutils
 import torch
 from lightning import Callback, LightningDataModule, LightningModule, Trainer
+from lightning.pytorch.callbacks import EarlyStopping
 from lightning.pytorch.loggers import Logger
 from omegaconf import DictConfig
 import wandb
@@ -34,6 +35,33 @@ def _reset_reduce_on_plateau_scheduler(scheduler) -> bool:
     if hasattr(scheduler, "_last_lr"):
         scheduler._last_lr = [pg["lr"] for pg in scheduler.optimizer.param_groups]
     return True
+
+
+class EarlyStoppingPatienceResetCallback(Callback):
+    """Zero `EarlyStopping.wait_count` once at train start.
+
+    Lightning restores `wait_count` from `last.ckpt`; without this, a re-submitted job can stop after
+    one epoch. We always reset the counter so each training attempt needs `patience` (from config)
+    non-improving validations again; `best_score` from the checkpoint is unchanged.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._done = False
+
+    def on_train_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
+        if self._done:
+            return
+        self._done = True
+        for cb in trainer.callbacks:
+            if isinstance(cb, EarlyStopping):
+                prev = getattr(cb, "wait_count", None)
+                cb.wait_count = 0
+                best = getattr(cb, "best_score", None)
+                log.info(
+                    "EarlyStopping: wait_count reset to 0 at run start "
+                    f"(was {prev}, patience={cb.patience}, best_score={best})"
+                )
 
 
 class ResumeResetCallback(Callback):
@@ -101,6 +129,7 @@ def train(cfg: DictConfig) -> Tuple[dict, dict]:
 
     log.info("Instantiating callbacks...")
     callbacks: List[Callback] = utils.instantiate_callbacks(cfg.get("callbacks"))
+    callbacks.append(EarlyStoppingPatienceResetCallback())
     if cfg.get("reset_scheduler_on_resume", False) or cfg.get("reset_lr_to_default_on_resume", False):
         callbacks.append(
             ResumeResetCallback(
