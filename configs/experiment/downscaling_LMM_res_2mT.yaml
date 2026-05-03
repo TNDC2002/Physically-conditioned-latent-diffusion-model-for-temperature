@@ -1,8 +1,8 @@
 # @package _global_
 #
-# Run: python src/train.py experiment=downscaling_LMM_res_2mT
-# MIG (smaller batch): experiment=downscaling_LMM_res_2mT_MIG — see Submitscript_MIG_LMM.sh
-# GPU smoke (parity + metrics + micro-train): sbatch configs/experiment/Submitscript_LMM_MIG.sh
+# Run:  python src/train.py experiment=downscaling_LMM_res_2mT
+# SLURM: configs/experiment/Submitscript.sh (cluster + resume paths only; training lives in this file)
+# MIG:   experiment=downscaling_LMM_res_2mT_MIG — see Submitscript_MIG_LMM.sh
 #
 # Point ``model.autoencoder.unet_regr.ckpt_path`` and ``model.ae_load_state_file`` to your
 # Stage-0 UNET and Stage-1 VAE checkpoints (see downscaling_LDM_res_2mT.yaml).
@@ -14,21 +14,34 @@ defaults:
 
 tags: ["downscaling", "lmm_res_2mT"]
 
-load_optimizer_state: false
+load_optimizer_state: true
+
+# Used at end of training for test selection (first ModelCheckpoint in trainer is the best-k one below).
+optimized_metric: val/control_score
+
+reset_scheduler_on_resume: false
+reset_lr_to_default_on_resume: false
+reset_lr_default_value: null
+
+paths:
+  data_dir: ${paths.root_dir}/LDM-downscaling/full_Dataset/
+
+trainer:
+  max_epochs: 100
 
 data:
   target_vars:
     high_res: ["2mT"]
   crop_size: 512
   batch_size: 17
-  num_workers: 2
+  num_workers: 8
   nn_lowres: false
 
 model:
   use_ema: true
   pde_lambda: 0.1
   temp_pde_coef: .00000000001
-  temp_energy_coef:  0
+  temp_energy_coef: 0
   pde_mode: "temp"
   temp_pde_num_supercells: 8
   autoencoder:
@@ -37,14 +50,52 @@ model:
   ae_load_state_file: ${paths.pretrained_models_dir}VAE_residual_2mT.ckpt
 
 callbacks:
+  rich_progress_bar: null
+
+  # Checkpoints: use THREE ModelCheckpoint callbacks. A single callback with every_n_epochs: 5 ties
+  # that interval to top-k / last logic, so you lose "true best at any epoch" and can miss periodic saves.
+  #
+  # 1) Best weights whenever val/control_score improves (any epoch).
+  # 2) A full ckpt every 5 completed epochs (after validation): 5, 10, 15, … (monitor=null, save_top_k=-1).
+  # 3) last.ckpt every validation (save_last only; every_n_epochs=0 disables extra top-k saves here).
+
   model_checkpoint:
     filename: "best_LMM_res_2mT_epoch_{epoch:03d}"
-    monitor: "val/control_score"
+    monitor: val/control_score
+    mode: min
     save_top_k: 1
+    save_last: false
+    auto_insert_metric_name: false
+    verbose: false
+    every_n_epochs: null
+
+  model_checkpoint_periodic:
+    _target_: lightning.pytorch.callbacks.ModelCheckpoint
+    dirpath: ${paths.output_dir}/checkpoints
+    filename: "LMM_res_2mT_every5_epoch_{epoch:03d}"
+    monitor: null
+    mode: min
+    save_top_k: -1
+    save_last: false
+    auto_insert_metric_name: false
+    verbose: false
+    every_n_epochs: 5
+    save_on_train_epoch_end: false
+
+  model_checkpoint_last:
+    _target_: lightning.pytorch.callbacks.ModelCheckpoint
+    dirpath: ${paths.output_dir}/checkpoints
+    monitor: null
+    mode: min
+    save_top_k: 0
     save_last: true
-    every_n_epochs: 1
+    auto_insert_metric_name: false
+    verbose: false
+    every_n_epochs: 0
+    save_on_train_epoch_end: false
+
   early_stopping:
     patience: 10
-    monitor: "val/control_score"
-    mode: "min"
+    monitor: val/control_score
+    mode: min
     verbose: true

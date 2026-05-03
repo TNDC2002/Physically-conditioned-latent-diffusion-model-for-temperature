@@ -1,31 +1,24 @@
 #!/bin/bash
-# SLURM submit script for LDM_res training on H100 GPU(s).
-# Edit the variables below to match your cluster and run.
+# SLURM wrapper for experiment=downscaling_LMM_res_2mT.
+# Training defaults live in configs/experiment/downscaling_LMM_res_2mT.yaml — this file only sets
+# cluster resources, PROJECT_ROOT, resume path, and a few overrides that depend on the allocation.
 
-# --- Customize these for your environment ---
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 LOG_DIR="${LOG_DIR:-$REPO_ROOT/slurm_logs}"
-PARTITION="${PARTITION:-main}"   # default partition on this cluster
-NUM_GPUS="${NUM_GPUS:-1}"               # 1 H100 (80GB) for compute-limited; use more if allowed
-GPU_TYPE="${GPU_TYPE:-nvidia_h100_80gb_hbm3}"            # GRES name on this cluster
+PARTITION="${PARTITION:-main}"
+NUM_GPUS="${NUM_GPUS:-1}"
+GPU_TYPE="${GPU_TYPE:-nvidia_h100_80gb_hbm3}"
 MEM="${MEM:-64G}"
 CPUS_PER_TASK="${CPUS_PER_TASK:-12}"
-TIME="${TIME:-1200:00:00}"
-# Independent toggles:
-# - LOAD_FROM_CHECKPOINT: load model state from CKPT_PATH (ckpt_path=<path>).
-# - REUSE_RUN_DIR: reuse CKPT_PATH's run folder; otherwise create a new timestamped run folder.
-# These toggles are intentionally independent for clarity.
+
 LOAD_FROM_CHECKPOINT="${LOAD_FROM_CHECKPOINT:-true}"
 REUSE_RUN_DIR="${REUSE_RUN_DIR:-true}"
 CKPT_PATH="${CKPT_PATH:-$REPO_ROOT/logs/train/runs/2026-04-24_18-27-35/checkpoints/last-v1.ckpt}"
-LOAD_OPTIMIZER_STATE="${LOAD_OPTIMIZER_STATE:-true}"  # true => restore optimizer/scheduler/epoch from checkpoint
-# When true (and LOAD_OPTIMIZER_STATE=true), keep resumed epoch+optimizer but reset scheduler state and LR.
+LOAD_OPTIMIZER_STATE="${LOAD_OPTIMIZER_STATE:-true}"
 RESET_SCHEDULER_AND_LR="${RESET_SCHEDULER_AND_LR:-false}"
-# Optional explicit LR value for reset (if empty, falls back to model.lr from config).
 RESET_LR_VALUE="${RESET_LR_VALUE:-1e-4}"
 DATA_NUM_WORKERS="${DATA_NUM_WORKERS:-8}"
 
-# Normalize boolean-like values to strict true/false.
 to_bool() {
     local v
     v="$(echo "$1" | tr '[:upper:]' '[:lower:]')"
@@ -73,7 +66,6 @@ fi
 DEFAULT_HYDRA_RUN_DIR='\${paths.log_dir}/\${task_name}/runs/\${now:%Y-%m-%d}_\${now:%H-%M-%S}'
 HYDRA_RUN_DIR="${RESUME_RUN_DIR:-$DEFAULT_HYDRA_RUN_DIR}"
 
-# Keep dataloader workers below requested CPUs to avoid oversubscription.
 if [[ "$DATA_NUM_WORKERS" -ge "$CPUS_PER_TASK" ]]; then
     DATA_NUM_WORKERS=$((CPUS_PER_TASK - 1))
 fi
@@ -83,7 +75,6 @@ fi
 
 mkdir -p "$LOG_DIR"
 
-# Submit the job (request H100 GPU(s); adjust GPU_TYPE if your cluster uses a different GRES name)
 sbatch \
     --job-name="LMM_res_2mT" \
     --mem="$MEM" \
@@ -98,20 +89,11 @@ sbatch \
             export PYTHONPATH=$REPO_ROOT:\$PYTHONPATH && \
             export OMP_NUM_THREADS=1 && \
             $REPO_ROOT/.venv/bin/python src/train.py \
-                    experiment=downscaling_LMM_res_2mT.yaml \
+                    experiment=downscaling_LMM_res_2mT \
                     ckpt_path=$CKPT_ARG \
                     load_optimizer_state=$LOAD_OPTIMIZER_STATE \
                     reset_scheduler_on_resume=$RESET_SCHEDULER_AND_LR \
                     reset_lr_to_default_on_resume=$RESET_SCHEDULER_AND_LR \
                     reset_lr_default_value=${RESET_LR_VALUE:-null} \
                     hydra.run.dir=$HYDRA_RUN_DIR \
-                    trainer.max_epochs=100 \
-                    data.num_workers=$DATA_NUM_WORKERS \
-                    paths.data_dir=$REPO_ROOT/LDM-downscaling/full_Dataset/ \
-                    optimized_metric=val/control_score \
-                    callbacks.early_stopping.monitor=val/control_score \
-                    callbacks.early_stopping.mode=min \
-                    callbacks.early_stopping.verbose=true \
-                    callbacks.model_checkpoint.monitor=val/control_score \
-                    callbacks.model_checkpoint.mode=min \
-                    callbacks.rich_progress_bar=null"
+                    data.num_workers=$DATA_NUM_WORKERS"
