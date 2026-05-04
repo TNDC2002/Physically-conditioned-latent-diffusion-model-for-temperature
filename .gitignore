@@ -1,9 +1,12 @@
 logs/
-slurm_logs/
+# slurm_logs/
 data/
-outputs/
+outputs/animations/
+outputs/models_inference_*.ipynb
+outputs/Our_results_trained_models_2mT.pkl
 wandb/ 
 MeanFlow/
+pretrained_models/
 
 # cache files
 src/utils/__pycache__/
@@ -24,7 +27,6 @@ notebooks/models_inference_executed.ipynb
 
 # logs
 *.log
-slurm_logs/
 
 # local / external
 DiffScaler/
