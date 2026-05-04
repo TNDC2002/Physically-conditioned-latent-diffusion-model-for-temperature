@@ -4,7 +4,8 @@ def get_model_output(model_type, model, loaded_data, sampler = None, num_diffusi
     if model_type=='unet-like':
         with torch.no_grad():
             test1 = model(loaded_data[0].to(device='cuda:0')).cpu()
-        ts_ns = loaded_data[2]
+        # ref_time is last element for both (low, high, time) and (low, high, static, time)
+        ts_ns = loaded_data[-1]
         return test1, ts_ns
     elif model_type=='ldm':
         low_res = loaded_data[0]     
