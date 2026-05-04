@@ -1,0 +1,9 @@
+Restored from /home/chuongtnd/git-repo/Physically-conditioned-latent-diffusion-model-for-temperature/pretrained_models/UNET_2mT.ckpt with 0 missing and 0 unexpected keys
+[LatentMeanFlowLitModule] trainable mf_unet params: 274,467,616; trainable autoencoder params: 0
+[AutoencoderKL] preprocess route: ae_flag=residual, ae_mode=None, use_for=None
+=== u_pred/u_tgt mean-std report ===
+ckpt_path: /home/chuongtnd/git-repo/Physically-conditioned-latent-diffusion-model-for-temperature/logs/train/runs/2026-04-24_18-27-35/checkpoints/last.ckpt
+val/u_pred: mean=0.0008255054, std=0.9517580702
+val/u_tgt: mean=0.0017566599, std=1.3790795234
+test/u_pred: mean=0.0008488174, std=0.9525204621
+test/u_tgt: mean=0.0018217772, std=1.3786964939
