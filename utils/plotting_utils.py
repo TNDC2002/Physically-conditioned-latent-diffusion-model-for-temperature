@@ -24,6 +24,54 @@ def from_torchtensor_to_xarray(torch_tensor, target_grid, coords_name='lat_lon')
     return ds
 
 
+def quadratic_regrid_era5_xr_to_high_res(
+    era5_on_low_grid: xr.DataArray, target_grid_high_res: xr.DataArray
+) -> xr.DataArray:
+    """Upsample an ERA5 low-res field to the high-res grid using scipy **quadratic** splines.
+
+    xarray only allows ``method in {'linear', 'nearest'}`` for simultaneous
+    multi-dimensional ``interp_like`` / ``interp`` over all axes at once; calling
+    ``interp_like(..., method='quadratic')`` on ``(y, x)`` therefore raises
+    ``ValueError`` on all supported xarray versions. To keep ``method='quadratic'``
+    (research baseline), interpolate **along y**, then **along x** — each step
+    is a valid 1-D quadratic pass (tensor-product style on a rectilinear grid).
+
+    ``target_grid_high_res`` is only used for its ``y`` and ``x`` coordinates
+    (e.g. ``get_target_grid('high')``); its data values are ignored.
+    """
+    hr_y = target_grid_high_res.coords["y"]
+    hr_x = target_grid_high_res.coords["x"]
+    scipy_kw = {"fill_value": "extrapolate"}
+    along_y = era5_on_low_grid.interp(
+        y=hr_y,
+        method="quadratic",
+        assume_sorted=False,
+        kwargs=scipy_kw,
+    )
+    return along_y.interp(
+        x=hr_x,
+        method="quadratic",
+        assume_sorted=False,
+        kwargs=scipy_kw,
+    )
+
+
+def linear_regrid_era5_xr_to_high_res(
+    era5_on_low_grid: xr.DataArray, target_grid_high_res: xr.DataArray
+) -> xr.DataArray:
+    """Upsample ERA5 low-res to high-res with xarray **linear** ND ``interp_like``.
+
+    ``linear`` is supported on ``(y, x)`` simultaneously; use alongside
+    :func:`quadratic_regrid_era5_xr_to_high_res` to compare baselines.
+    """
+    return era5_on_low_grid.interp_like(
+        target_grid_high_res,
+        method="linear",
+        assume_sorted=False,
+        kwargs={"fill_value": "extrapolate"},
+    )
+
+
 def show_snapshots(spat_dist_df: pd.DataFrame, target_res: str, output_dir: str, main_title: str = None, borders_file: str = None):
     # Set up the target grid
     target_grid = get_target_grid(target_res=target_res)
@@ -237,8 +285,11 @@ def show_power_spectra(spectra_df, output_dir: str):
     model_to_color = {'GAN': 'g',
                         'UNET': 'b',
                         'Quadratic Interp.': 'r',
+                        'Linear Interp.': '#17becf',
                         'COSMO-CLM': 'k',
-                        'LDM_res': 'orange'}
+                        'LDM_res': 'orange',
+                        'LDM_PDE_res': 'blue',
+                        'LMM_PDE_res': '#9467bd'}
     # Count available target vars and models
     my_models = spectra_df['model'].unique()
     my_variables = spectra_df['variable'].unique()
@@ -308,8 +359,11 @@ def show_freq_distrib(freq_df, output_dir: str):
     model_to_color = {'GAN': 'g',
                         'UNET': 'b',
                         'Quadratic Interp.': 'r',
+                        'Linear Interp.': '#17becf',
                         'COSMO-CLM': 'k',
-                        'LDM_res': 'orange'}
+                        'LDM_res': 'orange',
+                        'LDM_PDE_res': 'blue',
+                        'LMM_PDE_res': '#9467bd'}
     # Count available target vars and models
     my_models = freq_df['model'].unique()
     my_variables = freq_df['variable'].unique()
@@ -358,11 +412,16 @@ def show_freq_distrib(freq_df, output_dir: str):
 
 def show_metrics(metrics, output_dir):
     # Set up plotting resources
-    box_palette = {'Quadratic Interp.': 'r',
-                'UNET':'b',
-                'GAN': 'g',
-                'VAE_res': 'pink',
-                'LDM_res': 'orange'}
+    box_palette = {
+        'Quadratic Interp.': 'r',
+        'Linear Interp.': '#17becf',
+        'UNET': 'b',
+        'GAN': 'g',
+        'VAE_res': 'pink',
+        'LDM_res': 'orange',
+        'LDM_PDE_res': 'blue',
+        'LMM_PDE_res': '#9467bd',
+    }
     y_ref = [0,0,1,1,0,0,1,1]
     # Plot boxplots
     sns.set_theme(font_scale=1.5, style="whitegrid")
