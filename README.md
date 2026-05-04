@@ -190,3 +190,19 @@ srun --jobid= <id> --pty watch -n 1 nvidia-smi
 tensorboard --logdir logs/train/runs
 tail -n 1 -f /home/chuongtnd/git-repo/Physically-conditioned-latent-diffusion-model-for-temperature/slurm_logs/LMM_res_2mT-11647.out
 ```
+
+```bash
+mkdir -p slurm_logs
+
+sbatch \
+  --job-name=better_dataset_dl \
+  --partition=main \
+  --cpus-per-task=4 \
+  --mem=16G \
+  --time=0:00:00 \
+  --output=slurm_logs/better_download-%j.out \
+  --error=slurm_logs/better_download-%j.err \
+  --chdir=/home/chuongtnd/git-repo/Physically-conditioned-latent-diffusion-model-for-temperature \
+  --export=ALL,DOWNLOAD_DIR=/path/you/want/LDM-downscaling/better_full_dataset \
+  --wrap="bash data/Better_download_full_dataset.sh"
+```
