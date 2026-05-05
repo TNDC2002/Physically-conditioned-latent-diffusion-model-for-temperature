@@ -10,9 +10,11 @@
 # --- Config ---
 # Submit.sh lives in <repo>/notebooks/ → repo root is one level up (not ../..).
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-PARTITION="${PARTITION:-main}"
+# PARTITION="${PARTITION:-main}"
+PARTITION="${PARTITION:-mig}"
 NUM_GPUS="${NUM_GPUS:-1}"
-GPU_TYPE="${GPU_TYPE:-nvidia_h100_80gb_hbm3}"
+# GPU_TYPE="${GPU_TYPE:-nvidia_h100_80gb_hbm3}"
+GPU_TYPE="${GPU_TYPE:-nvidia_h100_80gb_hbm3_3g.40gb}"
 MEM="${MEM:-64G}"
 CPUS_PER_TASK="${CPUS_PER_TASK:-8}"
 # Many clusters reject 0:00:00; set a walltime if your site requires it (e.g. TIME=8:00:00).
