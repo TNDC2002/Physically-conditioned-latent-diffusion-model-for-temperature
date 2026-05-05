@@ -20,7 +20,7 @@ CPUS_PER_TASK="${CPUS_PER_TASK:-8}"
 # Many clusters reject 0:00:00; set a walltime if your site requires it (e.g. TIME=8:00:00).
 TIME="${TIME:-0:00:00}"
 
-NOTEBOOK="${NOTEBOOK:-$REPO_ROOT/notebooks/metric_computation.ipynb}"
+NOTEBOOK="${NOTEBOOK:-$REPO_ROOT/notebooks/models_inference.ipynb}"
 # Slurm stdout/stderr (match configs/experiment/Submitscript.sh → slurm_logs/)
 SLURM_LOG_DIR="${SLURM_LOG_DIR:-$REPO_ROOT/slurm_logs}"
 
@@ -91,7 +91,7 @@ jupyter nbconvert \\
     --ExecutePreprocessor.kernel_name=python3
 
 # Validate executed notebook JSON before publishing final output.
-python -c "import json; json.load(open('$REPO_ROOT/outputs/$TMP_OUT_FILE', encoding='utf-8')); print('Validated executed notebook JSON')"
+python -c "import json; json.load(open('$REPO_ROOT/outputs/\$TMP_OUT_FILE', encoding='utf-8')); print('Validated executed notebook JSON')"
 
 # Emit a clean/stable final notebook without large embedded outputs.
 jupyter nbconvert \\
