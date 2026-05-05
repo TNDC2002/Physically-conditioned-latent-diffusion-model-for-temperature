@@ -73,16 +73,34 @@ source .venv/bin/activate
 
 OUT_DIR="$REPO_ROOT/outputs"
 OUT_FILE="${BASENAME}_\$(date +%Y%m%d_%H%M%S).ipynb"
+TMP_OUT_FILE=".tmp_\${OUT_FILE}"
 mkdir -p "\$OUT_DIR"
+
+# Reduce noisy/huge transient notebook output during batch runs.
+export TQDM_DISABLE=1
+export MPLBACKEND=Agg
 
 jupyter nbconvert \\
     --to notebook \\
     --execute "$NOTEBOOK" \\
     --output-dir "\$OUT_DIR" \\
-    --output "\$OUT_FILE" \\
+    --output "\$TMP_OUT_FILE" \\
     --ExecutePreprocessor.timeout=-1 \\
     --ExecutePreprocessor.iopub_timeout=86400 \\
+    --ExecutePreprocessor.store_widget_state=False \\
     --ExecutePreprocessor.kernel_name=python3
 
+# Validate executed notebook JSON before publishing final output.
+python -c "import json; json.load(open('$REPO_ROOT/outputs/$TMP_OUT_FILE', encoding='utf-8')); print('Validated executed notebook JSON')"
+
+# Emit a clean/stable final notebook without large embedded outputs.
+jupyter nbconvert \\
+    --to notebook \\
+    --ClearOutputPreprocessor.enabled=True \\
+    --output-dir "\$OUT_DIR" \\
+    --output "\$OUT_FILE" \\
+    "\$OUT_DIR/\$TMP_OUT_FILE"
+
+rm -f "\$OUT_DIR/\$TMP_OUT_FILE"
 echo "Done. Output: \$OUT_DIR/\$OUT_FILE"
 EOF
