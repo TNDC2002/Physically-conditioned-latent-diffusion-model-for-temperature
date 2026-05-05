@@ -4,7 +4,7 @@ data/
 outputs/animations/
 outputs/back-up/
 outputs/models_inference_*.ipynb
-outputs/Our_results_trained_models_2mT.pkl
+outputs/Our_results_trained_models_2mT*
 wandb/ 
 MeanFlow/
 pretrained_models/
