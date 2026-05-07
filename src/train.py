@@ -38,16 +38,18 @@ def _reset_reduce_on_plateau_scheduler(scheduler) -> bool:
 
 
 class EarlyStoppingPatienceResetCallback(Callback):
-    """Zero `EarlyStopping.wait_count` once at train start.
+    """Normalize resumed EarlyStopping state at train start.
 
     Lightning restores `wait_count` from `last.ckpt`; without this, a re-submitted job can stop after
-    one epoch. We always reset the counter so each training attempt needs `patience` (from config)
-    non-improving validations again; `best_score` from the checkpoint is unchanged.
+    one epoch. We always reset the counter so each training attempt needs `patience` non-improving
+    validations again; `best_score` from the checkpoint is unchanged. We also optionally enforce the
+    configured patience because callback state restored from a checkpoint can carry stale patience.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, configured_patience: Optional[int] = None) -> None:
         super().__init__()
         self._done = False
+        self.configured_patience = configured_patience
 
     def on_train_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
         if self._done:
@@ -55,12 +57,15 @@ class EarlyStoppingPatienceResetCallback(Callback):
         self._done = True
         for cb in trainer.callbacks:
             if isinstance(cb, EarlyStopping):
-                prev = getattr(cb, "wait_count", None)
+                prev_wait = getattr(cb, "wait_count", None)
+                prev_patience = getattr(cb, "patience", None)
                 cb.wait_count = 0
+                if self.configured_patience is not None:
+                    cb.patience = int(self.configured_patience)
                 best = getattr(cb, "best_score", None)
                 log.info(
-                    "EarlyStopping: wait_count reset to 0 at run start "
-                    f"(was {prev}, patience={cb.patience}, best_score={best})"
+                    "EarlyStopping: state normalized at run start "
+                    f"(wait_count: {prev_wait}->0, patience: {prev_patience}->{cb.patience}, best_score={best})"
                 )
 
 
@@ -129,7 +134,10 @@ def train(cfg: DictConfig) -> Tuple[dict, dict]:
 
     log.info("Instantiating callbacks...")
     callbacks: List[Callback] = utils.instantiate_callbacks(cfg.get("callbacks"))
-    callbacks.append(EarlyStoppingPatienceResetCallback())
+    configured_patience = None
+    if cfg.get("callbacks") and cfg.callbacks.get("early_stopping"):
+        configured_patience = cfg.callbacks.early_stopping.get("patience")
+    callbacks.append(EarlyStoppingPatienceResetCallback(configured_patience=configured_patience))
     if cfg.get("reset_scheduler_on_resume", False) or cfg.get("reset_lr_to_default_on_resume", False):
         callbacks.append(
             ResumeResetCallback(
