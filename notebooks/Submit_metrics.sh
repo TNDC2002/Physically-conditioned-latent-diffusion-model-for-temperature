@@ -80,7 +80,9 @@ mkdir -p "\$OUT_DIR"
 
 # Reduce noisy/huge transient notebook output during batch runs.
 export TQDM_DISABLE=1
-export MPLBACKEND=Agg
+# Use inline backend so figures are embedded in executed notebook outputs.
+# Agg can render files, but it may not emit notebook display_data consistently.
+export MPLBACKEND=module://matplotlib_inline.backend_inline
 
 jupyter nbconvert \\
     --to notebook \\

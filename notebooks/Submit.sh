@@ -20,7 +20,7 @@ CPUS_PER_TASK="${CPUS_PER_TASK:-8}"
 # Many clusters reject 0:00:00; set a walltime if your site requires it (e.g. TIME=8:00:00).
 TIME="${TIME:-0:00:00}"
 
-NOTEBOOK="${NOTEBOOK:-$REPO_ROOT/notebooks/metric_computation.ipynb}"
+NOTEBOOK="${NOTEBOOK:-$REPO_ROOT/notebooks/models_inference.ipynb}"
 # Slurm stdout/stderr (match configs/experiment/Submitscript.sh → slurm_logs/)
 SLURM_LOG_DIR="${SLURM_LOG_DIR:-$REPO_ROOT/slurm_logs}"
 
