@@ -1,10 +1,19 @@
 import torch
 
 def get_model_output(model_type, model, loaded_data, sampler = None, num_diffusion_iters = None):
-    if model_type=='unet-like':
+    if model_type == "unet-like":
+        # ``DownscalingDataset``: ``nn_lowres=True`` embeds static into ``low_res`` on the CPU;
+        # ``nn_lowres=False`` returns ``(lr, hr, static, time)``. Match training / LMM / LDM by
+        # upsampling ``lr`` and concatenating ``static`` on GPU (``UnetLitModule._merge_lr_and_static``).
         with torch.no_grad():
-            test1 = model(loaded_data[0].to(device='cuda:0')).cpu()
-        # ref_time is last element for both (low, high, time) and (low, high, static, time)
+            if len(loaded_data) == 4 and hasattr(model, "_merge_lr_and_static"):
+                lr, _hr, static, _ts = loaded_data
+                x = model._merge_lr_and_static(
+                    lr.to(device="cuda:0"), static.to(device="cuda:0")
+                )
+                test1 = model(x).cpu()
+            else:
+                test1 = model(loaded_data[0].to(device="cuda:0")).cpu()
         ts_ns = loaded_data[-1]
         return test1, ts_ns
     elif model_type=='ldm':

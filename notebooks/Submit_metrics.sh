@@ -1,0 +1,114 @@
+#!/bin/bash
+# Submit models_inference.ipynb (or NOTEBOOK=...) to Slurm with GPU; writes executed notebook under \$REPO_ROOT/outputs/
+#
+# Usage (from repo root; this script calls sbatch):
+#   bash notebooks/Submit.sh
+# Note: `bash -n notebooks/Submit.sh` only checks syntax — it does NOT submit a job.
+# Optional env overrides:
+#   NOTEBOOK=... PARTITION=... TIME=8:00:00 MEM=64G ...
+#   KEEP_EXEC_OUTPUTS=1   # default: keep executed outputs in final notebook
+#   KEEP_EXEC_OUTPUTS=0   # optional: clear outputs for smaller file size
+
+# --- Config ---
+# Submit.sh lives in <repo>/notebooks/ → repo root is one level up (not ../..).
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# PARTITION="${PARTITION:-main}"
+PARTITION="${PARTITION:-mig}"
+NUM_GPUS="${NUM_GPUS:-1}"
+# GPU_TYPE="${GPU_TYPE:-nvidia_h100_80gb_hbm3}"
+GPU_TYPE="${GPU_TYPE:-nvidia_h100_80gb_hbm3_3g.40gb}"
+MEM="${MEM:-64G}"
+CPUS_PER_TASK="${CPUS_PER_TASK:-8}"
+# Many clusters reject 0:00:00; set a walltime if your site requires it (e.g. TIME=8:00:00).
+TIME="${TIME:-0:00:00}"
+
+NOTEBOOK="${NOTEBOOK:-$REPO_ROOT/notebooks/metric_computation.ipynb}"
+# Slurm stdout/stderr (match configs/experiment/Submitscript.sh → slurm_logs/)
+SLURM_LOG_DIR="${SLURM_LOG_DIR:-$REPO_ROOT/slurm_logs}"
+
+BASENAME=$(basename "$NOTEBOOK" .ipynb)
+
+echo "Submitting notebook job:"
+echo "  REPO_ROOT:     $REPO_ROOT"
+echo "  SLURM_LOG_DIR: $SLURM_LOG_DIR"
+echo "  Input:         $NOTEBOOK"
+echo "  Output dir:    $REPO_ROOT/outputs/  (timestamped ${BASENAME}_*.ipynb)"
+
+mkdir -p "$SLURM_LOG_DIR" "$REPO_ROOT/outputs"
+
+# Dataset lives under the project mount: LDM-downscaling/full_Dataset/ (see training yaml paths.data_dir).
+# Override if your mount is elsewhere: LDM_DATA_ROOT=/path/to/full_Dataset bash notebooks/Submit.sh
+LDM_DATA_ROOT_DEFAULT="$REPO_ROOT/LDM-downscaling/full_Dataset"
+LDM_DATA_RESOLVED="${LDM_DATA_ROOT:-$LDM_DATA_ROOT_DEFAULT}"
+if [[ ! -f "$LDM_DATA_RESOLVED/normalization_data.pkl" ]]; then
+    echo "ERROR: Missing normalization_data.pkl under data root:" >&2
+    echo "  $LDM_DATA_RESOLVED" >&2
+    echo "Set LDM_DATA_ROOT to your full_Dataset directory, or ensure \$REPO_ROOT/LDM-downscaling/full_Dataset exists." >&2
+    exit 1
+fi
+
+# --- Submit job ---
+sbatch <<EOF
+#!/bin/bash
+#SBATCH --job-name=nb_${BASENAME}
+#SBATCH --partition=$PARTITION
+#SBATCH --gres=gpu:${GPU_TYPE}:${NUM_GPUS}
+#SBATCH --mem=$MEM
+#SBATCH --cpus-per-task=$CPUS_PER_TASK
+#SBATCH --time=$TIME
+#SBATCH --output=$SLURM_LOG_DIR/%x-%j.out
+#SBATCH --error=$SLURM_LOG_DIR/%x-%j.err
+
+set -euo pipefail
+echo "Running on node: \$(hostname)"
+
+cd "$REPO_ROOT"
+mkdir -p "$SLURM_LOG_DIR" "$REPO_ROOT/outputs"
+
+export PROJECT_ROOT="$REPO_ROOT"
+export PYTHONPATH="$REPO_ROOT:\${PYTHONPATH:-}"
+export OMP_NUM_THREADS=1
+# Notebook reads this in \"Set paths\" (default: under project mount full_Dataset).
+export LDM_DATA_ROOT="${LDM_DATA_ROOT:-$REPO_ROOT/LDM-downscaling/full_Dataset}"
+
+source .venv/bin/activate
+
+OUT_DIR="$REPO_ROOT/outputs"
+OUT_FILE="${BASENAME}_\$(date +%Y%m%d_%H%M%S).ipynb"
+TMP_OUT_FILE=".tmp_\${OUT_FILE}"
+mkdir -p "\$OUT_DIR"
+
+# Reduce noisy/huge transient notebook output during batch runs.
+export TQDM_DISABLE=1
+export MPLBACKEND=Agg
+
+jupyter nbconvert \\
+    --to notebook \\
+    --execute "$NOTEBOOK" \\
+    --output-dir "\$OUT_DIR" \\
+    --output "\$TMP_OUT_FILE" \\
+    --ExecutePreprocessor.timeout=-1 \\
+    --ExecutePreprocessor.iopub_timeout=86400 \\
+    --ExecutePreprocessor.store_widget_state=False \\
+    --ExecutePreprocessor.kernel_name=python3
+
+# Validate executed notebook JSON before publishing final output.
+python -c "import json; json.load(open('$REPO_ROOT/outputs/\$TMP_OUT_FILE', encoding='utf-8')); print('Validated executed notebook JSON')"
+
+# Finalize output file:
+# - default: preserve execution outputs (plots/tables) for post-run inspection
+# - optional: clear outputs to reduce notebook size
+KEEP_EXEC_OUTPUTS="${KEEP_EXEC_OUTPUTS:-1}"
+if [[ "\$KEEP_EXEC_OUTPUTS" == "1" ]]; then
+    mv "\$OUT_DIR/\$TMP_OUT_FILE" "\$OUT_DIR/\$OUT_FILE"
+else
+    jupyter nbconvert \\
+        --to notebook \\
+        --ClearOutputPreprocessor.enabled=True \\
+        --output-dir "\$OUT_DIR" \\
+        --output "\$OUT_FILE" \\
+        "\$OUT_DIR/\$TMP_OUT_FILE"
+    rm -f "\$OUT_DIR/\$TMP_OUT_FILE"
+fi
+echo "Done. Output: \$OUT_DIR/\$OUT_FILE"
+EOF
