@@ -58,6 +58,9 @@ class LatentMeanFlowLitModule(LightningModule):
             "legacy_adaptive_l2": 0.0,
             "rmse": 1.0,
             "r2": 0.0,
+            # Unscaled physics scalars (same forward as ``temp_*_coef`` terms); not multiplied by coefs.
+            "temp_pde_pure": 0.0,
+            "temp_energy_pure": 0.0,
         }
         if control_metric_weights is not None:
             self.control_metric_weights.update({k: float(v) for k, v in control_metric_weights.items()})
@@ -142,14 +145,18 @@ class LatentMeanFlowLitModule(LightningModule):
         t: torch.Tensor,
         r: torch.Tensor,
         context: Dict[str, Any],
-    ) -> torch.Tensor:
+    ) -> tuple[torch.Tensor, Dict[str, torch.Tensor]]:
         """PDE / energy on a **decoded temperature** field.
 
         **Design lock (L-F):** decode the **one-step** latent ``single_step_generate(x_t, t, r, u_theta)``
         with ``u_theta = mf_unet(x_t, t, r, context)`` — same attachment spirit as using an explicit
         denoiser output in LDM, without decoding raw velocity.
+
+        Returns ``(scaled_addon, pure_metrics)`` where ``pure_metrics`` holds **unscaled** losses
+        (``temp_pde_pure``, ``temp_energy_pure``) for logging / ``val/control_score``, detached.
         """
         addon = torch.zeros((), device=x_t.device, dtype=x_t.dtype)
+        pure_metrics: Dict[str, torch.Tensor] = {}
         if self.pde_lambda > 0 and self.pde_mode == "uv":
             raise NotImplementedError("LMM v1 does not implement UV PDE on latent MFUNet outputs.")
 
@@ -161,12 +168,14 @@ class LatentMeanFlowLitModule(LightningModule):
                 raise ValueError("For temperature PDE loss, context must be a dict containing key 'T_c'")
             T_c = context["T_c"]
             if self.temp_pde_coef > 0:
-                addon = addon + self.temp_pde_coef * self._field_losses.temperature_pde_loss(
-                    T_f, T_c, self.temp_pde_num_supercells
-                )
+                pde_raw = self._field_losses.temperature_pde_loss(T_f, T_c, self.temp_pde_num_supercells)
+                addon = addon + self.temp_pde_coef * pde_raw
+                pure_metrics["temp_pde_pure"] = pde_raw.detach()
             if self.temp_energy_coef > 0:
-                addon = addon + self.temp_energy_coef * self._field_losses.temperature_energy_loss(T_f, T_c)
-        return addon
+                e_raw = self._field_losses.temperature_energy_loss(T_f, T_c)
+                addon = addon + self.temp_energy_coef * e_raw
+                pure_metrics["temp_energy_pure"] = e_raw.detach()
+        return addon, pure_metrics
 
     @staticmethod
     def _compute_rmse_r2(u_pred: torch.Tensor, u_tgt: torch.Tensor) -> Dict[str, torch.Tensor]:
@@ -205,13 +214,17 @@ class LatentMeanFlowLitModule(LightningModule):
         )
         error, u_pred, u_tgt = error
         mf_loss = self.meanflow_core.adaptive_l2_loss(error)
-        phys = self._physics_addon(x_t, t, r, context)
+        phys, pure_phys = self._physics_addon(x_t, t, r, context)
         total_loss = mf_loss + phys
 
         with torch.no_grad():
             metrics = self._compute_rmse_r2(u_pred, u_tgt)
             if self.use_meanflow_paper_core:
                 metrics["legacy_adaptive_l2"] = self._legacy_meanflow_core.adaptive_l2_loss(error.detach())
+            # Same pattern as rmse/r2: always defined so callers use metrics["..."] directly.
+            z_phys = torch.zeros((), device=metrics["rmse"].device, dtype=metrics["rmse"].dtype)
+            metrics["temp_pde_pure"] = pure_phys.get("temp_pde_pure", z_phys)
+            metrics["temp_energy_pure"] = pure_phys.get("temp_energy_pure", z_phys)
 
         return total_loss, metrics
 
@@ -243,6 +256,8 @@ class LatentMeanFlowLitModule(LightningModule):
         self.log("val/loss_ema", loss_ema, **log_params, sync_dist=True)
         self.log("val/rmse", metrics["rmse"], **log_params, sync_dist=True)
         self.log("val/r2", metrics["r2"], **log_params, sync_dist=True)
+        self.log("val/temp_pde_pure", metrics["temp_pde_pure"], **log_params, sync_dist=True)
+        self.log("val/temp_energy_pure", metrics["temp_energy_pure"], **log_params, sync_dist=True)
         # Composite control monitor used by scheduler/early-stop/checkpoint selection.
         # Lower is better; better r2 reduces score via the negative sign.
         legacy_l2 = metrics.get("legacy_adaptive_l2")
@@ -254,6 +269,8 @@ class LatentMeanFlowLitModule(LightningModule):
             + self.control_metric_weights["legacy_adaptive_l2"] * legacy_l2
             + self.control_metric_weights["rmse"] * metrics["rmse"]
             - self.control_metric_weights["r2"] * metrics["r2"]
+            + self.control_metric_weights["temp_pde_pure"] * metrics["temp_pde_pure"]
+            + self.control_metric_weights["temp_energy_pure"] * metrics["temp_energy_pure"]
         )
         self.log("val/control_score", control_score, **log_params, sync_dist=True)
         if "legacy_adaptive_l2" in metrics:

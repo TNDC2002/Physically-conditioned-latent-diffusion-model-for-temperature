@@ -1,7 +1,7 @@
 # @package _global_
 #
 # Run:  python src/train.py experiment=downscaling_LMM_res_2mT
-# SLURM: configs/experiment/Submitscript.sh (cluster + resume paths only; training lives in this file)
+# SLURM: configs/experiment/Submitscript.sh (cluster + ``data.num_workers`` only; training lives here)
 # MIG:   experiment=downscaling_LMM_res_2mT_MIG — see Submitscript_MIG_LMM.sh
 #
 # Point ``model.autoencoder.unet_regr.ckpt_path`` and ``model.ae_load_state_file`` to your
@@ -14,7 +14,17 @@ defaults:
 
 tags: ["downscaling", "lmm_res_2mT"]
 
+# Lightning ``trainer.fit(..., ckpt_path=...)`` — full resume when ``load_optimizer_state: true``.
+# Set to ``null`` to train from scratch.
+ckpt_path: ${paths.root_dir}/logs/train/runs/2026-04-24_18-27-35/checkpoints/last.ckpt
+
 load_optimizer_state: true
+
+# Optional: when resuming, pin Hydra output to the **existing** run folder (parent of ``checkpoints/``).
+# Uncomment so TensorBoard / checkpoints stay alongside ``ckpt_path``. Omit for a new timestamped run.
+# hydra:
+#   run:
+#     dir: ${paths.root_dir}/logs/train/runs/2026-04-24_18-27-35
 
 # Used at end of training for test selection (first ModelCheckpoint in trainer is the best-k one below).
 optimized_metric: val/control_score

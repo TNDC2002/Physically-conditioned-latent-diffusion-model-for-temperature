@@ -77,12 +77,16 @@ lr_warmup: 0
 use_ema: true
 loss_type: l2
 # Composite control-score weights (shared by scheduler/early-stop/checkpoint):
-# val/loss, val/legacy_adaptive_l2, val/rmse, and (-val/r2), respectively.
+# val/loss, val/legacy_adaptive_l2, val/rmse, (-val/r2), and unscaled temperature
+# physics (``temp_pde_pure`` / ``temp_energy_pure`` — same definitions as the PDE
+# losses but **not** multiplied by ``temp_pde_coef`` / ``temp_energy_coef``).
 control_metric_weights:
   loss: 1.0
   legacy_adaptive_l2: 1.0
   rmse: 1.0
   r2: 1.0
+  temp_pde_pure: 1.0
+  temp_energy_pure: 0.0
 
 pde_lambda: 0.0
 pde_mode: "temp"

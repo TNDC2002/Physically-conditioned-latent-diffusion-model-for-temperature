@@ -16,6 +16,7 @@ src/models/components/ldm/denoiser/__pycache__/
 src/models/__pycache__/
 src/models/components/__pycache__/
 src/models/components/ldm/__pycache__/
+src/models/components/meanflow/__pycache__/
 utils/__pycache__/
 *.pyc
 
