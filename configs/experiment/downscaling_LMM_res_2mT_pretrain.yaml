@@ -16,7 +16,7 @@ tags: ["downscaling", "lmm_res_2mT"]
 
 # Weight init from this LMM ckpt (``load_optimizer_state: false`` → weights only; see ``src/train.py``).
 # Set to ``null`` to initialize from random weights.
-ckpt_path: ${paths.root_dir}/logs/train/runs/2026-05-11_15-07-49/checkpoints/last.ckpt
+ckpt_path: ${paths.root_dir}/logs/train/runs/2026-05-12_14-40-55/checkpoints/last.ckpt
 
 load_optimizer_state: true
 
