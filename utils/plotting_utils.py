@@ -182,6 +182,392 @@ def show_snapshots(spat_dist_df: pd.DataFrame, target_res: str, output_dir: str,
     plt.show()
     plt.close()
 
+
+def _as_numpy_field(value) -> np.ndarray:
+    if isinstance(value, (list, tuple)) and len(value) == 1:
+        value = value[0]
+    if hasattr(value, "detach"):
+        value = value.detach().cpu().numpy()
+    elif hasattr(value, "values"):
+        value = value.values
+    return np.asarray(value, dtype=float).squeeze()
+
+
+def _compute_q_field_numpy(T: np.ndarray, dx: float = 1.0, dy: float = 1.0, eps: float = 1e-6):
+    """q = -||grad T||^2 grad T (same definition as flux-loss notebook)."""
+    T = np.asarray(T, dtype=float)
+    H, W = T.shape
+    dTdx = np.zeros_like(T)
+    dTdy = np.zeros_like(T)
+    if W > 2:
+        dTdx[:, 1:-1] = (T[:, 2:] - T[:, :-2]) / (2.0 * dx)
+    if H > 2:
+        dTdy[1:-1, :] = (T[2:, :] - T[:-2, :]) / (2.0 * dy)
+    if W > 1:
+        dTdx[:, 0] = (T[:, 1] - T[:, 0]) / dx
+        dTdx[:, -1] = (T[:, -1] - T[:, -2]) / dx
+    if H > 1:
+        dTdy[0, :] = (T[1, :] - T[0, :]) / dy
+        dTdy[-1, :] = (T[-1, :] - T[-2, :]) / dy
+    grad_sq = dTdx ** 2 + dTdy ** 2
+    qx = -grad_sq * dTdx
+    qy = -grad_sq * dTdy
+    q_mag = np.sqrt(qx ** 2 + qy ** 2 + eps)
+    return qx, qy, q_mag
+
+
+def target_res_for_field(field: np.ndarray) -> str:
+    for res in ("high", "low"):
+        coords = get_target_coords(res)
+        if field.shape == (len(coords["y"]), len(coords["x"])):
+            return res
+    raise ValueError(
+        f"Field shape {field.shape} does not match high/low target grids "
+        f"(high={(len(get_target_coords('high')['y']), len(get_target_coords('high')['x']))}, "
+        f"low={(len(get_target_coords('low')['y']), len(get_target_coords('low')['x']))})."
+    )
+
+
+def field_to_latlon_da(field: np.ndarray, target_res: str) -> xr.DataArray:
+    grid = get_target_grid(target_res=target_res)
+    lats = grid.coords["y"].values
+    lons = grid.coords["x"].values
+    field = _as_numpy_field(field)
+    if field.shape != (len(lats), len(lons)):
+        raise ValueError(f"Shape {field.shape} != grid {(len(lats), len(lons))} for {target_res=}")
+    return xr.DataArray(field, coords={"lat": lats, "lon": lons}, dims=["lat", "lon"])
+
+
+def show_temperature_flux_snapshots(
+    spat_dist_df: pd.DataFrame,
+    *,
+    variable: str = "2mT",
+    output_dir: str | None = None,
+    main_title: str | None = None,
+    borders_file: str | None = None,
+    quiver_scale: float = 200.0,
+    pick_stride_full: int = 50,
+    pick_stride_zoom: int = 10,
+    zoom_x_lim: tuple[float, float] = (4150000, 4450000),
+    zoom_y_lim: tuple[float, float] = (1748000, 2070000),
+):
+    """Fig_snapshots **WS10 / UV layout** (2 columns: full | zoom): one panel each with
+    **2mT coolwarm** background + **q** quiver overlay.
+
+    Same setup as wind (``WS10`` imshow + ``U10``/``V10`` quiver, stride 50/10, scale 200,
+    quiverkey box, borders) but background uses **2mT [K]** ``min``/``max`` — not ``|q|`` jet.
+    Arrow length encodes ``|q|``.
+    """
+    spat_dist_df = spat_dist_df[spat_dist_df["variable"] == variable].copy()
+    if spat_dist_df.empty:
+        raise ValueError(f"No rows for variable={variable!r}")
+
+    my_models = list(spat_dist_df["model"].unique())
+    min_value = float(spat_dist_df["min"].min())
+    max_value = float(spat_dist_df["max"].max())
+    if min_value < 0 and max_value > 0:
+        bound = max(abs(min_value), abs(max_value))
+        min_value, max_value = -bound, bound
+
+    gdf_bn = gpd.read_file(borders_file) if borders_file else None
+    n_rows = len(my_models)
+    fig, axs = plt.subplots(nrows=n_rows, ncols=2, figsize=(8, 5 * n_rows), constrained_layout=True)
+    if n_rows == 1:
+        axs = np.array([axs])
+    if main_title is not None:
+        fig.suptitle(str(main_title), fontsize=22)
+
+    ref_quiver_len = None
+    for sim_row, sim in enumerate(my_models):
+        row = spat_dist_df[spat_dist_df["model"] == sim].iloc[0]
+        T = _as_numpy_field(row["spat_distr"])
+        target_res = target_res_for_field(T)
+        qx, qy, q_mag = _compute_q_field_numpy(T)
+        map_t = field_to_latlon_da(T, target_res)
+        map_qx = field_to_latlon_da(qx, target_res)
+        map_qy = field_to_latlon_da(qy, target_res)
+        field_map = xr.merge(
+            [map_t.rename("T"), map_qx.rename("qx"), map_qy.rename("qy")],
+            compat="no_conflicts",
+            join="outer",
+            combine_attrs="override",
+        )
+        field_map["qx"] = field_map["qx"].transpose()
+        field_map["qy"] = field_map["qy"].transpose()
+        field_map["T"] = field_map["T"].transpose()
+
+        target_grid = get_target_grid(target_res=target_res)
+        if target_res == "low":
+            stride_full = max(2, pick_stride_full // 8)
+            stride_zoom = max(1, pick_stride_zoom // 2)
+        else:
+            stride_full, stride_zoom = pick_stride_full, pick_stride_zoom
+
+        for col in range(2):
+            ax = axs[sim_row, col]
+            if col == 0:
+                x_lim = [target_grid.coords["x"].min().values, target_grid.coords["x"].max().values]
+                y_lim = [target_grid.coords["y"].min().values, target_grid.coords["y"].max().values]
+                pick_stride = stride_full
+            else:
+                x_lim = list(zoom_x_lim)
+                y_lim = list(zoom_y_lim)
+                pick_stride = stride_zoom
+            ax.set_xlim(x_lim)
+            ax.set_ylim(y_lim)
+
+            we = field_map["T"].plot.imshow(
+                ax=ax,
+                robust=True,
+                add_colorbar=False,
+                x="lon",
+                y="lat",
+                cmap="coolwarm",
+                alpha=0.85,
+                vmin=min_value,
+                vmax=max_value,
+            )
+            we0 = field_map.thin(pick_stride).plot.quiver(
+                ax=ax,
+                u="qx",
+                v="qy",
+                x="lon",
+                y="lat",
+                scale=quiver_scale,
+                add_guide=False,
+            )
+            if ref_quiver_len is None:
+                ref_quiver_len = float(
+                    np.nanpercentile(
+                        np.sqrt(field_map["qx"].values ** 2 + field_map["qy"].values ** 2),
+                        95,
+                    )
+                )
+            vec_len = ref_quiver_len if ref_quiver_len > 0 else 1.0
+            maxstr = f"{vec_len:.2e}"
+            plt.quiverkey(
+                we0,
+                0.9,
+                0.07,
+                vec_len,
+                maxstr,
+                labelpos="S",
+                coordinates="axes",
+                fontproperties={"size": 13},
+            ).set_zorder(11)
+            rect = patches.Rectangle(
+                (x_lim[1] - (x_lim[1] - x_lim[0]) / 5, y_lim[0]),
+                (x_lim[1] - x_lim[0]) / 5,
+                (y_lim[1] - y_lim[0]) / 11,
+                linestyle="-",
+                linewidth=2,
+                edgecolor="w",
+                facecolor="w",
+            )
+            ax.add_patch(rect)
+            if gdf_bn is not None:
+                gdf_bn.plot(ax=ax, color="black")
+            ax.get_xaxis().set_visible(False)
+            if col == 0:
+                ax.yaxis.set_tick_params(labelleft=False, left=False)
+                ax.set_ylabel(str(sim), fontsize=20)
+            else:
+                ax.get_yaxis().set_visible(False)
+
+    cbar = fig.colorbar(we, ax=axs, location="bottom")
+    cbar.set_label(f"{variable} [K]", fontsize=20)
+    cbar.ax.tick_params(labelsize=18)
+
+    if output_dir is not None:
+        filename = "Fig_temp_flux_" + str(main_title) + ".jpg"
+        plt.savefig(output_dir + filename, bbox_inches="tight")
+    plt.show()
+    plt.close()
+    return fig
+
+
+def _symmetric_2mT_limits(min_v: float, max_v: float) -> tuple[float, float]:
+    if min_v < 0 and max_v > 0:
+        bound = max(abs(min_v), abs(max_v))
+        return -bound, bound
+    return min_v, max_v
+
+
+def _style_flux_map_axes(ax, x_lim, y_lim, gdf_bn, ylabel: str | None = None, show_ylabel: bool = False):
+    ax.set_xlim(x_lim)
+    ax.set_ylim(y_lim)
+    if gdf_bn is not None:
+        gdf_bn.plot(ax=ax, color="black")
+    ax.get_xaxis().set_visible(False)
+    if show_ylabel and ylabel:
+        ax.set_ylabel(ylabel, fontsize=20)
+        ax.yaxis.set_tick_params(labelleft=False, left=False)
+    else:
+        ax.get_yaxis().set_visible(False)
+
+
+def _plot_2mT_background(
+    ax,
+    field_map: xr.Dataset,
+    vmin: float,
+    vmax: float,
+    x_lim,
+    y_lim,
+    gdf_bn,
+    *,
+    pick_stride: int | None = None,
+    quiver_scale: float = 200.0,
+    ylabel: str | None = None,
+    show_ylabel: bool = False,
+):
+    """Coolwarm 2mT background; optional black q quiver (arrow length encodes |q|)."""
+    mappable = field_map["T"].plot.imshow(
+        ax=ax,
+        x="lon",
+        y="lat",
+        cmap="coolwarm",
+        vmin=vmin,
+        vmax=vmax,
+        add_colorbar=False,
+        robust=True,
+        alpha=0.85 if pick_stride is not None else 1.0,
+    )
+    _style_flux_map_axes(ax, x_lim, y_lim, gdf_bn, ylabel=ylabel, show_ylabel=show_ylabel)
+    if pick_stride is None:
+        return mappable
+    thin = field_map.thin(pick_stride)
+    q_plot = thin.plot.quiver(
+        ax=ax,
+        u="qx",
+        v="qy",
+        x="lon",
+        y="lat",
+        scale=quiver_scale,
+        add_guide=False,
+        color="k",
+    )
+    ref_len = float(
+        np.nanpercentile(np.sqrt(field_map["qx"].values ** 2 + field_map["qy"].values ** 2), 95)
+    )
+    if ref_len <= 0:
+        ref_len = 1.0
+    plt.quiverkey(
+        q_plot,
+        0.9,
+        0.07,
+        ref_len,
+        f"{ref_len:.2e}",
+        labelpos="S",
+        coordinates="axes",
+        fontproperties={"size": 11},
+    ).set_zorder(11)
+    rect = patches.Rectangle(
+        (x_lim[1] - (x_lim[1] - x_lim[0]) / 5, y_lim[0]),
+        (x_lim[1] - x_lim[0]) / 5,
+        (y_lim[1] - y_lim[0]) / 11,
+        linestyle="-",
+        linewidth=2,
+        edgecolor="w",
+        facecolor="w",
+    )
+    ax.add_patch(rect)
+    return mappable
+
+
+def show_temperature_flux_four_panel(
+    spat_dist_df: pd.DataFrame,
+    *,
+    variable: str = "2mT",
+    output_dir: str | None = None,
+    main_title: str | None = None,
+    borders_file: str | None = None,
+    quiver_scale: float = 200.0,
+    pick_stride_full: int = 50,
+    pick_stride_zoom: int = 10,
+    zoom_x_lim: tuple[float, float] = (4150000, 4450000),
+    zoom_y_lim: tuple[float, float] = (1748000, 2070000),
+):
+    """Four columns per model — **two separate 2mT [K] colorbars**.
+
+    | Col | Content |
+    |-----|---------|
+    | 1–2 | 2mT only (full \\| zoom), coolwarm |
+    | 3–4 | 2mT coolwarm background + **q** quiver (WS10 layout); flux from arrows, not ``|q|`` colors |
+    """
+    spat_dist_df = spat_dist_df[spat_dist_df["variable"] == variable].copy()
+    if spat_dist_df.empty:
+        raise ValueError(f"No rows for variable={variable!r}")
+
+    my_models = list(spat_dist_df["model"].unique())
+    gdf_bn = gpd.read_file(borders_file) if borders_file else None
+    n_rows = len(my_models)
+    fig, axs = plt.subplots(nrows=n_rows, ncols=4, figsize=(16, 5 * n_rows), constrained_layout=True)
+    if n_rows == 1:
+        axs = np.array([axs])
+    if main_title is not None:
+        fig.suptitle(str(main_title), fontsize=22)
+
+    im_T = None
+    im_Tq = None
+    for sim_row, sim in enumerate(my_models):
+        row = spat_dist_df[spat_dist_df["model"] == sim].iloc[0]
+        T = _as_numpy_field(row["spat_distr"])
+        target_res = target_res_for_field(T)
+        qx, qy, _ = _compute_q_field_numpy(T)
+        map_t = field_to_latlon_da(T, target_res)
+        map_qx = field_to_latlon_da(qx, target_res)
+        map_qy = field_to_latlon_da(qy, target_res)
+        field_map = xr.merge(
+            [map_t.rename("T"), map_qx.rename("qx"), map_qy.rename("qy")],
+            compat="no_conflicts",
+            join="outer",
+            combine_attrs="override",
+        )
+        for v in ("T", "qx", "qy"):
+            field_map[v] = field_map[v].transpose()
+
+        t_vmin, t_vmax = _symmetric_2mT_limits(float(row["min"]), float(row["max"]))
+        grid = get_target_grid(target_res=target_res)
+        x_full = [grid.coords["x"].min().values, grid.coords["x"].max().values]
+        y_full = [grid.coords["y"].min().values, grid.coords["y"].max().values]
+        x_zoom, y_zoom = list(zoom_x_lim), list(zoom_y_lim)
+
+        if target_res == "low":
+            s_full = max(2, pick_stride_full // 8)
+            s_zoom = max(1, pick_stride_zoom // 2)
+        else:
+            s_full, s_zoom = pick_stride_full, pick_stride_zoom
+
+        im_T = _plot_2mT_background(
+            axs[sim_row, 0], field_map, t_vmin, t_vmax, x_full, y_full, gdf_bn,
+            ylabel=str(sim), show_ylabel=True,
+        )
+        _plot_2mT_background(axs[sim_row, 1], field_map, t_vmin, t_vmax, x_zoom, y_zoom, gdf_bn)
+        im_Tq = _plot_2mT_background(
+            axs[sim_row, 2], field_map, t_vmin, t_vmax, x_full, y_full, gdf_bn,
+            pick_stride=s_full, quiver_scale=quiver_scale,
+        )
+        _plot_2mT_background(
+            axs[sim_row, 3], field_map, t_vmin, t_vmax, x_zoom, y_zoom, gdf_bn,
+            pick_stride=s_zoom, quiver_scale=quiver_scale,
+        )
+
+    if im_T is not None:
+        cbar_t = fig.colorbar(im_T, ax=axs[:, :2].ravel().tolist(), location="bottom", shrink=0.55, pad=0.02)
+        cbar_t.set_label(f"{variable} [K]", fontsize=20)
+        cbar_t.ax.tick_params(labelsize=18)
+    if im_Tq is not None:
+        cbar_tq = fig.colorbar(im_Tq, ax=axs[:, 2:].ravel().tolist(), location="bottom", shrink=0.55, pad=0.14)
+        cbar_tq.set_label(f"{variable} [K]", fontsize=20)
+        cbar_tq.ax.tick_params(labelsize=18)
+
+    if output_dir is not None:
+        plt.savefig(output_dir + f"Fig_temp_flux_{main_title}.jpg", bbox_inches="tight")
+    plt.show()
+    plt.close()
+    return fig
+
+
 def get_target_grid(target_res: str):
     coords = get_target_coords(target_res)
     if target_res == 'high':
