@@ -37,3 +37,4 @@ pretrained_models/wget-log
 
 # legacy
 legacy/
+/.venv
