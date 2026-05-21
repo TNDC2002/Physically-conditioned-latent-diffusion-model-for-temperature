@@ -183,38 +183,6 @@ def show_snapshots(spat_dist_df: pd.DataFrame, target_res: str, output_dir: str,
     plt.close()
 
 
-def _as_numpy_field(value) -> np.ndarray:
-    if isinstance(value, (list, tuple)) and len(value) == 1:
-        value = value[0]
-    if hasattr(value, "detach"):
-        value = value.detach().cpu().numpy()
-    elif hasattr(value, "values"):
-        value = value.values
-    return np.asarray(value, dtype=float).squeeze()
-
-
-def _compute_q_field_numpy(T: np.ndarray, dx: float = 1.0, dy: float = 1.0, eps: float = 1e-6):
-    """q = -||grad T||^2 grad T (anisotropic flux)."""
-    T = np.asarray(T, dtype=float)
-    H, W = T.shape
-    dTdx = np.zeros_like(T)
-    dTdy = np.zeros_like(T)
-    if W > 2:
-        dTdx[:, 1:-1] = (T[:, 2:] - T[:, :-2]) / (2.0 * dx)
-    if H > 2:
-        dTdy[1:-1, :] = (T[2:, :] - T[:-2, :]) / (2.0 * dy)
-    if W > 1:
-        dTdx[:, 0] = (T[:, 1] - T[:, 0]) / dx
-        dTdx[:, -1] = (T[:, -1] - T[:, -2]) / dx
-    if H > 1:
-        dTdy[0, :] = (T[1, :] - T[0, :]) / dy
-        dTdy[-1, :] = (T[-1, :] - T[-2, :]) / dy
-    grad_sq = dTdx ** 2 + dTdy ** 2
-    qx = -grad_sq * dTdx
-    qy = -grad_sq * dTdy
-    return qx, qy
-
-
 def _target_res_for_field(field: np.ndarray) -> str:
     for res in ("high", "low"):
         coords = get_target_coords(res)
@@ -223,29 +191,109 @@ def _target_res_for_field(field: np.ndarray) -> str:
     raise ValueError(f"Field shape {field.shape} does not match high/low target grids.")
 
 
-def _sign_q_field(arr: np.ndarray, scale: float = 10.0) -> np.ndarray:
-    """Direction-only quiver: sign(q) in {-1, 0, 1}, multiplied by ``scale`` (e.g. ±10)."""
-    return np.sign(np.asarray(arr, dtype=float)) * scale
+def _vectors_for_quiver_display(
+    u: np.ndarray,
+    v: np.ndarray,
+    boost: float | None,
+    *,
+    use_lens: bool = True,
+    key_length: float = 8.0,
+    magnitude_gamma: float = 0.45,
+    ref_percentile: float = 50.0,
+    min_arrow_frac: float = 0.15,
+    max_arrow_frac: float = 1.0,
+    eps: float = 1e-20,
+) -> tuple[np.ndarray, np.ndarray, str, float]:
+    """Map raw vectors to quiver arrows (plot only; physics unchanged).
+
+    - **use_lens** ``False``: pass **raw** ``u, v`` (matches histogram |q|; weak arrows may vanish).
+    - **use_lens** ``True`` (default): display "lens" — direction kept, magnitude remapped:
+    - **magnitude_gamma** in (0, 1]: compresses dynamic range (``0.45`` default).
+      ``1.0`` = linear scaling from median ref; smaller γ = more equal arrow lengths.
+    - **min/max_arrow_frac**: floor weak arrows (no dots), cap extreme arrows.
+    - **boost**: if set, linear ``u*boost`` (ignores gamma; use for manual tuning).
+    """
+    u = np.asarray(u, dtype=float)
+    v = np.asarray(v, dtype=float)
+    mag = np.hypot(u, v)
+    u_hat = np.zeros_like(u)
+    v_hat = np.zeros_like(v)
+    mask = mag > eps
+    u_hat[mask] = u[mask] / mag[mask]
+    v_hat[mask] = v[mask] / mag[mask]
+
+    if not use_lens:
+        ref = float(np.nanpercentile(mag[mask], ref_percentile)) if np.any(mask) else 1.0
+        if ref <= 0:
+            ref = 1.0
+        tag = f"raw, ref=p{ref_percentile:g}"
+        return u, v, tag, ref
+
+    if boost is not None:
+        mag_disp = mag * boost
+        tag = f"linear ×{boost:.2e}"
+    else:
+        ref = float(np.nanpercentile(mag[mask], ref_percentile)) if np.any(mask) else 1.0
+        if ref <= 0:
+            ref = 1.0
+        mag_norm = np.where(mask, mag / ref, 0.0)
+        gamma = float(np.clip(magnitude_gamma, 0.05, 1.0))
+        mag_disp = key_length * np.power(mag_norm, gamma)
+        tag = f"γ={gamma:g}, ref=p{ref_percentile:g}"
+
+    lo = min_arrow_frac * key_length
+    hi = max_arrow_frac * key_length
+    mag_disp = np.clip(mag_disp, lo, hi)
+    return u_hat * mag_disp, v_hat * mag_disp, tag, key_length
 
 
-def _field_map_from_T_q(T, qx, qy, target_grid, var: str) -> xr.Dataset:
-    map_t = from_torchtensor_to_xarray(torch.from_numpy(np.asarray(T, dtype=float)), target_grid)
-    map_qx = from_torchtensor_to_xarray(torch.from_numpy(np.asarray(qx, dtype=float)), target_grid)
-    map_qy = from_torchtensor_to_xarray(torch.from_numpy(np.asarray(qy, dtype=float)), target_grid)
-    field_map = xr.merge(
-        [map_t.rename(var), map_qx.rename("qx"), map_qy.rename("qy")],
-        compat="no_conflicts",
-        join="outer",
-        combine_attrs="override",
+_FLUX_PANEL_META = [
+    ("A", "Flux q (raw qx, qy)"),
+    ("B", "Flux q (raw qx, qy)"),
+    ("C", "Grad T (raw dTdx, dTdy)"),
+    ("D", "Grad T (raw dTdx, dTdy)"),
+    ("E", "trace(J) + raw grad T (recovered J)"),
+    ("F", "trace(J) + raw grad T (recovered J)"),
+]
+
+
+def _flux_panel_label(panel: int) -> tuple[str, str, str]:
+    letter, name = _FLUX_PANEL_META[panel]
+    region = "zoom" if panel % 2 else "domain"
+    return letter, name, region
+
+
+def _annotate_flux_panel(ax, panel: int) -> None:
+    letter, name, region = _flux_panel_label(panel)
+    ax.set_title(f"{letter}. {name} — {region}", fontsize=11, fontweight="bold", loc="left")
+    ax.text(
+        0.02,
+        0.97,
+        letter,
+        transform=ax.transAxes,
+        fontsize=15,
+        fontweight="bold",
+        va="top",
+        ha="left",
+        color="white",
+        bbox=dict(facecolor="black", alpha=0.65, pad=3, edgecolor="none"),
+        zorder=12,
     )
-    field_map[var] = field_map[var].transpose()
-    field_map["qx"] = field_map["qx"].transpose()
-    field_map["qy"] = field_map["qy"].transpose()
+
+
+def _numpy_to_field_map(fields: dict[str, np.ndarray], target_grid, t_var: str = "2mT") -> xr.Dataset:
+    das = []
+    for name, arr in fields.items():
+        da = from_torchtensor_to_xarray(torch.from_numpy(np.asarray(arr, dtype=float)), target_grid)
+        das.append(da.rename(t_var if name == "T" else name))
+    field_map = xr.merge(das, compat="no_conflicts", join="outer", combine_attrs="override")
+    for v in field_map.data_vars:
+        field_map[v] = field_map[v].transpose()
     return field_map
 
 
-def _panel_limits(col: int, target_grid):
-    if col % 2 == 0:
+def _panel_limits(zoom: bool, target_grid):
+    if not zoom:
         x_lim = [target_grid.coords["x"].min().values, target_grid.coords["x"].max().values]
         y_lim = [target_grid.coords["y"].min().values, target_grid.coords["y"].max().values]
         pick_stride = 50
@@ -256,17 +304,69 @@ def _panel_limits(col: int, target_grid):
     return x_lim, y_lim, pick_stride
 
 
-def _style_q_panel_ax(ax, x_lim, y_lim, gdf_bn, borders_file, sim, col: int):
+def _style_q_panel_ax(
+    ax, x_lim, y_lim, gdf_bn, borders_file, sim, col: int, *, ylabel: str | None = None
+):
     ax.set_xlim(x_lim)
     ax.set_ylim(y_lim)
+    ax.set_aspect("equal", adjustable="box")
     if borders_file:
         gdf_bn.plot(ax=ax, color="black")
     ax.get_xaxis().set_visible(False)
-    if col == 0:
+    if col == 0 and ylabel:
         ax.yaxis.set_tick_params(labelleft=False, left=False)
-        ax.set_ylabel(sim, fontsize=20)
+        ax.set_ylabel(ylabel, fontsize=16 if len(ylabel) < 20 else 14)
     else:
         ax.get_yaxis().set_visible(False)
+
+
+# WS10 / 7bf7bad: quiver ``scale=200`` only — do not use scale_units='xy' on lon/lat in metres.
+_QUIVER_SCALE = 200
+
+
+def _plot_jet_T_quiver_panel(
+    ax,
+    field_map: xr.Dataset,
+    t_var: str,
+    *,
+    t_vmin: float,
+    t_vmax: float,
+    u_var: str,
+    v_var: str,
+    pick_stride: int,
+    quiver_ref: float,
+    quiver_label: str,
+    x_lim,
+    y_lim,
+    quiver_color: str | None = None,
+):
+    """WS10-style panel: ``jet`` 2mT background + vector overlay."""
+    mappable = field_map[t_var].plot.imshow(
+        ax=ax,
+        robust=True,
+        add_colorbar=False,
+        x="lon",
+        y="lat",
+        cmap="jet",
+        alpha=0.8,
+        vmin=t_vmin,
+        vmax=t_vmax,
+    )
+    quiver_kw = dict(
+        ax=ax,
+        u=u_var,
+        v=v_var,
+        x="lon",
+        y="lat",
+        scale=_QUIVER_SCALE,
+        add_guide=False,
+    )
+    if quiver_color is not None:
+        quiver_kw["color"] = quiver_color
+    q_plot = field_map.thin(pick_stride).plot.quiver(**quiver_kw)
+    _add_ws10_quiverkey(q_plot, quiver_ref, quiver_label)
+    _add_ws10_key_box(ax, x_lim, y_lim)
+    return mappable
 
 
 def _add_ws10_quiverkey(quiver_plot, ref_len: float, label: str):
@@ -295,24 +395,83 @@ def _add_ws10_key_box(ax, x_lim, y_lim):
     ax.add_patch(rect)
 
 
+def _plot_jet_T_Jtrace_panel(
+    ax,
+    field_map: xr.Dataset,
+    t_var: str,
+    *,
+    t_vmin: float,
+    t_vmax: float,
+    j_tr_vmin: float,
+    j_tr_vmax: float,
+    x_lim,
+    y_lim,
+):
+    """``jet`` 2mT background + ``plasma`` trace(J) overlay (recovered J, not real K)."""
+    mappable = field_map[t_var].plot.imshow(
+        ax=ax,
+        robust=True,
+        add_colorbar=False,
+        x="lon",
+        y="lat",
+        cmap="jet",
+        alpha=0.8,
+        vmin=t_vmin,
+        vmax=t_vmax,
+    )
+    field_map["J_trace"].plot.imshow(
+        ax=ax,
+        add_colorbar=False,
+        x="lon",
+        y="lat",
+        cmap="plasma",
+        alpha=0.65,
+        vmin=j_tr_vmin,
+        vmax=j_tr_vmax,
+    )
+    _add_ws10_key_box(ax, x_lim, y_lim)
+    return mappable
+
+
+_FLUX_FIELD_KEYS = ("T", "dTdx", "dTdy", "J_trace", "qx", "qy")
+
+
+def _validate_flux_by_model(flux_by_model: dict[str, dict[str, np.ndarray]], models) -> None:
+    for model in models:
+        if model not in flux_by_model:
+            raise KeyError(f"flux_by_model missing model={model!r}")
+        missing = [k for k in _FLUX_FIELD_KEYS if k not in flux_by_model[model]]
+        if missing:
+            raise KeyError(f"flux_by_model[{model!r}] missing keys: {missing}")
+
+
 def show_q_snapshots(
     spat_dist_df: pd.DataFrame,
+    flux_by_model: dict[str, dict[str, np.ndarray]],
     *,
     variable: str = "2mT",
     output_dir: str | None = None,
     main_title: str | None = None,
     borders_file: str | None = None,
-    dx: float = 1.0,
-    dy: float = 1.0,
-    grad_eps: float = 1e-6,
-    sign_q_arrow_scale: float = 5.0,
+    vector_display_boost: float | None = None,
+    q_display_boost: float | None = None,
+    grad_display_boost: float | None = None,
+    quiver_key_length: float = 8.0,
+    use_quiver_lens: bool = True,
+    display_magnitude_gamma: float = 0.45,
+    display_min_arrow_frac: float = 0.15,
+    display_max_arrow_frac: float = 1.0,
 ):
-    """Plot **q** per model on 4 panels (WS10 layout).
+    """Plot precomputed flux fields (6 panels per model, 2×3 WS10 layout).
 
-    | Cols | Content |
-    |------|---------|
-    | 0–1 | Magnitude: ``jet`` 2mT + ``qx``/``qy`` quiver (full \\| zoom) |
-    | 2–3 | Direction: same ``jet`` 2mT + ``sign(q)*scale`` quiver (default scale=10 → ±10, 0) |
+    Physics (∇T, recovered **J**, q) must be computed in the notebook; pass
+    ``flux_by_model[model]`` with keys ``T``, ``dTdx``, ``dTdy``, ``J_trace``, ``qx``, ``qy``.
+    ``J_trace`` = trace(J) = |∇T|² (scalar summary of recovered J; not real conductive K).
+
+    Quiver display: set ``use_quiver_lens=False`` to plot **raw** ``qx/qy`` (consistent with |q|
+    histograms). ``use_quiver_lens=True`` (default) applies power-law compression (γ) plus
+    min/max arrow floors so weak and extreme vectors remain visible.
+    Set ``display_magnitude_gamma=1`` for linear lens; manual ``*_display_boost`` overrides lens.
     """
     spat_dist_df = spat_dist_df[spat_dist_df["variable"] == variable].copy()
     if spat_dist_df.empty:
@@ -321,71 +480,157 @@ def show_q_snapshots(
     gdf_bn = gpd.read_file(borders_file) if borders_file else None
 
     my_models = spat_dist_df["model"].unique()
+    _validate_flux_by_model(flux_by_model, my_models)
     rig_max = len(my_models)
     var = variable
     labels = {"2mT": "[K]"}
     min_value = min(spat_dist_df["min"])
     max_value = max(spat_dist_df["max"])
 
-    # Single 4-column grid (subfigures often show only 2 panels in Jupyter).
-    fig, axs = plt.subplots(nrows=rig_max, ncols=4, figsize=(20, 5 * rig_max), constrained_layout=True)
-    if rig_max == 1:
+    n_panels = 6
+    ncols = 3
+    nrows_per_model = 2
+    nrows = rig_max * nrows_per_model
+    fig, axs = plt.subplots(
+        nrows=nrows, ncols=ncols, figsize=(5 * ncols, 5 * nrows), constrained_layout=True
+    )
+    if nrows == 1:
         axs = np.array([axs])
     if main_title is not None:
         fig.suptitle(main_title, fontsize=22, y=1.02)
-    col_titles = [
-        "|q| full",
-        "|q| zoom",
-        "sign(q) full",
-        "sign(q) zoom",
-    ]
-    for j, title in enumerate(col_titles):
-        axs[0, j].set_title(title, fontsize=12)
+    if use_quiver_lens:
+        arrow_note = (
+            f"Arrows: display lens ON (γ={display_magnitude_gamma:g}, "
+            f"min={display_min_arrow_frac:g}×key, max={display_max_arrow_frac:g}×key) — "
+            "direction kept; lengths remapped for visibility"
+        )
+    else:
+        arrow_note = "Arrows: display lens OFF — raw qx/qy (true relative magnitudes; may hide weak vectors)"
+    fig.text(0.5, 0.005, arrow_note, ha="center", fontsize=10, style="italic")
 
     im_mag = None
     for sim_row in range(rig_max):
         sim = my_models[sim_row]
-        row = spat_dist_df[spat_dist_df["model"] == sim].iloc[0]
-        T = _as_numpy_field(row["spat_distr"])
-        target_res = _target_res_for_field(T)
+        flux = flux_by_model[sim]
+        target_res = _target_res_for_field(flux["T"])
         target_grid = get_target_grid(target_res=target_res)
-        qx, qy = _compute_q_field_numpy(T, dx=dx, dy=dy, eps=grad_eps)
-        qx_sign = _sign_q_field(qx, scale=sign_q_arrow_scale)
-        qy_sign = _sign_q_field(qy, scale=sign_q_arrow_scale)
 
-        field_mag = _field_map_from_T_q(T, qx, qy, target_grid, var)
-        field_dir = _field_map_from_T_q(T, qx_sign, qy_sign, target_grid, var)
-
-        for col in range(4):
-            zoom_col = col % 2
-            x_lim, y_lim, pick_stride = _panel_limits(zoom_col, target_grid)
-            ax = axs[sim_row, col]
-            _style_q_panel_ax(ax, x_lim, y_lim, gdf_bn, borders_file, sim, col)
-
-            field_map = field_mag if col < 2 else field_dir
-            im_mag = field_map[var].plot.imshow(
-                ax=ax,
-                robust=True,
-                add_colorbar=False,
-                x="lon",
-                y="lat",
-                cmap="jet",
-                alpha=0.8,
-                vmin=min_value,
-                vmax=max_value,
+        q_boost = q_display_boost if q_display_boost is not None else vector_display_boost
+        g_boost = grad_display_boost if grad_display_boost is not None else vector_display_boost
+        disp_kw = dict(
+            use_lens=use_quiver_lens,
+            key_length=quiver_key_length,
+            magnitude_gamma=display_magnitude_gamma,
+            min_arrow_frac=display_min_arrow_frac,
+            max_arrow_frac=display_max_arrow_frac,
+        )
+        q_raw_max = float(np.nanmax(np.hypot(flux["qx"], flux["qy"])))
+        if use_quiver_lens and q_raw_max > 0 and q_raw_max < 1e-4:
+            print(
+                f"Warning [{sim}]: max |q|={q_raw_max:.3e} — lens remaps arrow lengths "
+                f"(γ={display_magnitude_gamma:g}, min_frac={display_min_arrow_frac:g}); "
+                "they are not proportional to physical |q|. Set use_quiver_lens=False to verify."
             )
-            q_plot = field_map.thin(pick_stride).plot.quiver(
-                ax=ax, u="qx", v="qy", x="lon", y="lat", scale=200, add_guide=False
+        qx_d, qy_d, q_tag, q_key = _vectors_for_quiver_display(
+            flux["qx"], flux["qy"], q_boost, **disp_kw
+        )
+        gx_d, gy_d, g_tag, g_key = _vectors_for_quiver_display(
+            flux["dTdx"], flux["dTdy"], g_boost, **disp_kw
+        )
+
+        field_q = _numpy_to_field_map(
+            {"T": flux["T"], "qx": qx_d, "qy": qy_d}, target_grid, t_var=var
+        )
+        field_grad = _numpy_to_field_map(
+            {"T": flux["T"], "qx": gx_d, "qy": gy_d}, target_grid, t_var=var
+        )
+        field_j_grad = _numpy_to_field_map(
+            {"T": flux["T"], "dTdx": gx_d, "dTdy": gy_d, "J_trace": flux["J_trace"]},
+            target_grid,
+            t_var=var,
+        )
+
+        j_tr_vmax = float(np.nanpercentile(flux["J_trace"], 99)) or 1.0
+
+        for panel in range(n_panels):
+            grid_row = sim_row * nrows_per_model + panel // ncols
+            col = panel % ncols
+            zoom = panel % 2 == 1
+            x_lim, y_lim, pick_stride = _panel_limits(zoom, target_grid)
+            ax = axs[grid_row, col]
+            row_ylabel = sim if panel < ncols else "grad T & J"
+            _style_q_panel_ax(
+                ax, x_lim, y_lim, gdf_bn, borders_file, sim, col, ylabel=row_ylabel if col == 0 else None
             )
-            if col < 2:
-                _add_ws10_quiverkey(q_plot, 8.0, "%3.1f m/s" % 8)
+            _annotate_flux_panel(ax, panel)
+
+            if panel < 2:
+                im_mag = _plot_jet_T_quiver_panel(
+                    ax,
+                    field_q,
+                    var,
+                    t_vmin=min_value,
+                    t_vmax=max_value,
+                    u_var="qx",
+                    v_var="qy",
+                    pick_stride=pick_stride,
+                    quiver_ref=q_key,
+                    quiver_label=f"q {q_tag}",
+                    x_lim=x_lim,
+                    y_lim=y_lim,
+                )
+            elif panel < 4:
+                im_mag = _plot_jet_T_quiver_panel(
+                    ax,
+                    field_grad,
+                    var,
+                    t_vmin=min_value,
+                    t_vmax=max_value,
+                    u_var="qx",
+                    v_var="qy",
+                    pick_stride=pick_stride,
+                    quiver_ref=g_key,
+                    quiver_label=f"grad T {g_tag}",
+                    x_lim=x_lim,
+                    y_lim=y_lim,
+                )
             else:
-                ref = sign_q_arrow_scale
-                _add_ws10_quiverkey(q_plot, ref, f"sign(q)=±{ref:g}")
-            _add_ws10_key_box(ax, x_lim, y_lim)
+                im_mag = _plot_jet_T_Jtrace_panel(
+                    ax,
+                    field_j_grad,
+                    var,
+                    t_vmin=min_value,
+                    t_vmax=max_value,
+                    j_tr_vmin=0.0,
+                    j_tr_vmax=j_tr_vmax,
+                    x_lim=x_lim,
+                    y_lim=y_lim,
+                )
+                q_k = field_j_grad.thin(pick_stride).plot.quiver(
+                    ax=ax,
+                    u="dTdx",
+                    v="dTdy",
+                    x="lon",
+                    y="lat",
+                    scale=_QUIVER_SCALE,
+                    add_guide=False,
+                    color="w",
+                    alpha=0.9,
+                )
+                _add_ws10_quiverkey(q_k, g_key, f"grad T {g_tag}")
+                ax.text(
+                    0.02,
+                    0.88,
+                    f"trace(J) max (p99)={j_tr_vmax:.2e}",
+                    transform=ax.transAxes,
+                    fontsize=9,
+                    va="top",
+                    color="white",
+                    bbox=dict(facecolor="black", alpha=0.5, pad=2),
+                )
 
     if im_mag is not None:
-        cbar = fig.colorbar(im_mag, ax=axs, location="bottom", shrink=0.6, pad=0.08)
+        cbar = fig.colorbar(im_mag, ax=axs, location="bottom", shrink=0.5, pad=0.06)
         cbar.set_label(var + " " + labels.get(var, ""), fontsize=20)
         cbar.ax.tick_params(labelsize=18)
 
@@ -395,6 +640,11 @@ def show_q_snapshots(
     plt.show()
     plt.close()
     return fig
+
+
+def show_grad_K_debug_snapshots(*args, **kwargs):
+    """Alias for ``show_q_snapshots`` (grad T / trace(J) on the second row)."""
+    return show_q_snapshots(*args, **kwargs)
 
 
 def get_target_grid(target_res: str):
