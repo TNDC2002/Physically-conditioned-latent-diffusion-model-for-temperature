@@ -154,6 +154,56 @@ class TemperatureFieldLosses:
         loss_map = torch.abs(R_f - R_c)
         return torch.mean(loss_map)
 
-    def temperature_energy_loss(self, T_f: torch.Tensor, T_c: torch.Tensor) -> torch.Tensor:
-        T_f_down = F.adaptive_avg_pool2d(T_f, T_c.shape[-2:])
-        return torch.mean((T_f_down - T_c) ** 2)
+    def _anisotropic_flux_q(
+        self, T: torch.Tensor, dx: float = 1.0, dy: float = 1.0
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """q = -J @ grad T with recovered J = grad T grad T^T (same as flux notebook)."""
+        dTdx, dTdy = self._compute_gradients_torch_batch(T, dx=dx, dy=dy)
+        J_xx = dTdx * dTdx
+        J_xy = dTdx * dTdy
+        J_yy = dTdy * dTdy
+        qx = -(J_xx * dTdx + J_xy * dTdy)
+        qy = -(J_xy * dTdx + J_yy * dTdy)
+        return qx, qy
+
+    def anisotropic_transport_loss(
+        self,
+        T_pred: torch.Tensor,
+        T_gt: torch.Tensor,
+        *,
+        dx: float = 2000.0,
+        dy: float = -2000.0,
+        eps: float = 1e-12,
+        lambda_mag: float = 1.0,
+        lambda_dir: float = 1.0,
+        direction_kind: str = "cosine",
+    ) -> dict[str, torch.Tensor]:
+        """Anisotropic Transport Loss: L = lambda_mag * L_mag + lambda_dir * L_dir.
+
+        - L_mag = MSE(log(|q_pred|+eps), log(|q_gt|+eps))
+        - L_dir = mean(1 - cos(q_pred, q_gt)) or unit-vector MSE on q_hat
+
+        ``T_pred``: reconstructed residual R (decoded one-step latent), normalized.
+        ``T_gt``: normalized COSMO-CLM high-res target (batch ``y``).
+        """
+        qx_p, qy_p = self._anisotropic_flux_q(T_pred, dx=dx, dy=dy)
+        qx_g, qy_g = self._anisotropic_flux_q(T_gt, dx=dx, dy=dy)
+        mag_p = torch.hypot(qx_p, qy_p)
+        mag_g = torch.hypot(qx_g, qy_g)
+        l_mag = F.mse_loss(torch.log(mag_p + eps), torch.log(mag_g + eps))
+
+        if direction_kind == "cosine":
+            dot = qx_p * qx_g + qy_p * qy_g
+            cos = dot / (mag_p * mag_g + eps)
+            l_dir = (1.0 - cos).mean()
+        elif direction_kind == "unit_mse":
+            px, py = qx_p / (mag_p + eps), qy_p / (mag_p + eps)
+            gx, gy = qx_g / (mag_g + eps), qy_g / (mag_g + eps)
+            l_dir = F.mse_loss(px, gx) + F.mse_loss(py, gy)
+        else:
+            raise ValueError(
+                f"direction_kind must be 'cosine' or 'unit_mse', got {direction_kind!r}"
+            )
+
+        l_total = lambda_mag * l_mag + lambda_dir * l_dir
+        return {"L_mag": l_mag, "L_dir": l_dir, "L_total": l_total}

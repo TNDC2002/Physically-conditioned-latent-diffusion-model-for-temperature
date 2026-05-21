@@ -16,9 +16,9 @@ tags: ["downscaling", "lmm_res_2mT"]
 
 # Weight init from this LMM ckpt (``load_optimizer_state: false`` → weights only; see ``src/train.py``).
 # Set to ``null`` to initialize from random weights.
-ckpt_path: ${paths.root_dir}/logs/train/runs/2026-05-12_14-40-55/checkpoints/last.ckpt
+ckpt_path: ${paths.root_dir}/logs/train/runs/2026-05-14_07-18-49/checkpoints/best_LMM_res_2mT_epoch_020.ckpt
 
-load_optimizer_state: true
+load_optimizer_state: false
 
 # Optional: pin Hydra output when continuing in the same run directory (see ``downscaling_LMM_res_2mT.yaml``).
 # hydra:
@@ -28,8 +28,8 @@ load_optimizer_state: true
 # Used at end of training for test selection (first ModelCheckpoint in trainer is the best-k one below).
 optimized_metric: val/control_score
 
-reset_scheduler_on_resume: false
-reset_lr_to_default_on_resume: false
+reset_scheduler_on_resume: true
+reset_lr_to_default_on_resume: true
 reset_lr_default_value: null
 
 paths:
@@ -57,17 +57,24 @@ model:
     loss: 0.0
     legacy_adaptive_l2: 0.0
     rmse: 1.0
-    r2: 1.0
-    temp_pde_pure: 0.1
-    temp_energy_pure: 0.0
-
+    r2: 0.0
+    temp_pde_pure: 0.01
+    at_mag_pure: 1.0
+    at_dir_pure: 1.0
 
   use_ema: true
   pde_lambda: 0.1
-  temp_pde_coef: .000000005
-  temp_energy_coef: 0
+  temp_pde_coef: 0.0
   pde_mode: "temp"
   temp_pde_num_supercells: 8
+  # Anisotropic Transport: R̂ vs normalized COSMO-CLM (not ERA5 T_c)
+  anisotropic_transport_coef: 1.0e-9
+  at_lambda_mag: 1.0
+  at_lambda_dir: 1.0
+  at_loss_eps: 1.0e-12
+  at_direction_loss: cosine # cosine or unit_mse
+  at_dx: 2000.0
+  at_dy: -2000.0
   autoencoder:
     unet_regr:
       ckpt_path: ${paths.pretrained_models_dir}UNET_2mT.ckpt

@@ -1,6 +1,6 @@
 # Latent Meanflow Model (LMM): MeanFlow on z_R (latent residual), parallel to ldm.yaml.
 #
-# PDE decode source (L-F design lock): during training, temperature PDE / energy use the field
+# PDE decode source (L-F design lock): during training, physics losses use the field
 # obtained by decoding ``single_step_generate(x_t, t, r, mf_unet(x_t,t,r,context))`` — a one-step
 # latent estimate, not a raw MF velocity tensor and not DDIM.
 
@@ -77,21 +77,29 @@ lr_warmup: 0
 use_ema: true
 loss_type: l2
 # Composite control-score weights (shared by scheduler/early-stop/checkpoint):
-# val/loss, val/legacy_adaptive_l2, val/rmse, (-val/r2), and unscaled temperature
-# physics (``temp_pde_pure`` / ``temp_energy_pure`` — same definitions as the PDE
-# losses but **not** multiplied by ``temp_pde_coef`` / ``temp_energy_coef``).
+# val/loss, val/legacy_adaptive_l2, val/rmse, (-val/r2), and unscaled physics scalars.
 control_metric_weights:
   loss: 1.0
   legacy_adaptive_l2: 1.0
   rmse: 1.0
   r2: 1.0
   temp_pde_pure: 1.0
-  temp_energy_pure: 0.0
+  at_mag_pure: 0.0
+  at_dir_pure: 0.0
 
 pde_lambda: 0.0
 pde_mode: "temp"
 temp_pde_coef: 0.0
-temp_energy_coef: 0.0
 temp_pde_num_supercells: 8
+
+# Anisotropic Transport Loss: L = at_lambda_mag * L_mag + at_lambda_dir * L_dir
+# on reconstructed R̂ vs normalized COSMO-CLM (T_hr). Scaled by anisotropic_transport_coef.
+anisotropic_transport_coef: 0.0
+at_lambda_mag: 1.0
+at_lambda_dir: 1.0
+at_loss_eps: 1.0e-12
+at_direction_loss: cosine
+at_dx: 2000.0
+at_dy: -2000.0
 
 ae_load_state_file: null

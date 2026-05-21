@@ -34,8 +34,14 @@ class LatentMeanFlowLitModule(LightningModule):
         pde_lambda: float = 0.0,
         pde_mode: Optional[str] = None,
         temp_pde_coef: float = 0.0,
-        temp_energy_coef: float = 0.0,
         temp_pde_num_supercells: int = 8,
+        anisotropic_transport_coef: float = 0.0,
+        at_lambda_mag: float = 1.0,
+        at_lambda_dir: float = 1.0,
+        at_loss_eps: float = 1e-12,
+        at_direction_loss: str = "cosine",
+        at_dx: float = 2000.0,
+        at_dy: float = -2000.0,
         use_meanflow_paper_core: bool = False,
         meanflow_paper: Optional[Dict[str, Any]] = None,
         control_metric_weights: Optional[Dict[str, float]] = None,
@@ -50,17 +56,24 @@ class LatentMeanFlowLitModule(LightningModule):
         self.pde_lambda = pde_lambda
         self.pde_mode = pde_mode
         self.temp_pde_coef = float(temp_pde_coef)
-        self.temp_energy_coef = float(temp_energy_coef)
         self.temp_pde_num_supercells = int(temp_pde_num_supercells)
+        self.anisotropic_transport_coef = float(anisotropic_transport_coef)
+        self.at_lambda_mag = float(at_lambda_mag)
+        self.at_lambda_dir = float(at_lambda_dir)
+        self.at_loss_eps = float(at_loss_eps)
+        self.at_direction_loss = str(at_direction_loss)
+        self.at_dx = float(at_dx)
+        self.at_dy = float(at_dy)
         self.use_meanflow_paper_core = bool(use_meanflow_paper_core)
         self.control_metric_weights = {
             "loss": 0.0,
             "legacy_adaptive_l2": 0.0,
             "rmse": 1.0,
             "r2": 0.0,
-            # Unscaled physics scalars (same forward as ``temp_*_coef`` terms); not multiplied by coefs.
+            # Unscaled physics scalars (same forward as training coefs); not multiplied by coefs.
             "temp_pde_pure": 0.0,
-            "temp_energy_pure": 0.0,
+            "at_mag_pure": 0.0,
+            "at_dir_pure": 0.0,
         }
         if control_metric_weights is not None:
             self.control_metric_weights.update({k: float(v) for k, v in control_metric_weights.items()})
@@ -146,35 +159,58 @@ class LatentMeanFlowLitModule(LightningModule):
         r: torch.Tensor,
         context: Dict[str, Any],
     ) -> tuple[torch.Tensor, Dict[str, torch.Tensor]]:
-        """PDE / energy on a **decoded temperature** field.
+        """Physics on **decoded residual** ``R̂`` (one-step latent decode).
 
-        **Design lock (L-F):** decode the **one-step** latent ``single_step_generate(x_t, t, r, u_theta)``
-        with ``u_theta = mf_unet(x_t, t, r, context)`` — same attachment spirit as using an explicit
-        denoiser output in LDM, without decoding raw velocity.
+        **Design lock (L-F):** decode ``single_step_generate(x_t, t, r, mf_unet(...))``.
 
-        Returns ``(scaled_addon, pure_metrics)`` where ``pure_metrics`` holds **unscaled** losses
-        (``temp_pde_pure``, ``temp_energy_pure``) for logging / ``val/control_score``, detached.
+        - Diffusive–advective PDE (optional): ``R̂`` vs normalized ERA5 ``T_c``.
+        - Anisotropic Transport (optional): ``R̂`` vs normalized COSMO-CLM ``T_hr``.
+
+        Returns ``(scaled_addon, pure_metrics)`` with unscaled terms for logging / control score.
         """
         addon = torch.zeros((), device=x_t.device, dtype=x_t.dtype)
         pure_metrics: Dict[str, torch.Tensor] = {}
         if self.pde_lambda > 0 and self.pde_mode == "uv":
             raise NotImplementedError("LMM v1 does not implement UV PDE on latent MFUNet outputs.")
 
-        if self.pde_mode == "temp" and (self.temp_pde_coef > 0 or self.temp_energy_coef > 0):
+        need_decode = (self.pde_mode == "temp" and self.temp_pde_coef > 0) or (
+            self.anisotropic_transport_coef > 0
+        )
+        if need_decode:
+            if not isinstance(context, dict):
+                raise ValueError("Physics losses require context dict with T_c and/or T_hr")
             u_theta = self.mf_unet(x_t, t, r, context=context)
             z_hat = self.meanflow_core.single_step_generate(x_t, t, r, u_theta)
             T_f = self.autoencoder.decode(z_hat)
-            if not isinstance(context, dict) or "T_c" not in context:
-                raise ValueError("For temperature PDE loss, context must be a dict containing key 'T_c'")
-            T_c = context["T_c"]
-            if self.temp_pde_coef > 0:
-                pde_raw = self._field_losses.temperature_pde_loss(T_f, T_c, self.temp_pde_num_supercells)
+
+            if self.pde_mode == "temp" and self.temp_pde_coef > 0:
+                if "T_c" not in context:
+                    raise ValueError("temp_pde_coef > 0 requires context['T_c'] (normalized ERA5)")
+                pde_raw = self._field_losses.temperature_pde_loss(
+                    T_f, context["T_c"], self.temp_pde_num_supercells
+                )
                 addon = addon + self.temp_pde_coef * pde_raw
                 pure_metrics["temp_pde_pure"] = pde_raw.detach()
-            if self.temp_energy_coef > 0:
-                e_raw = self._field_losses.temperature_energy_loss(T_f, T_c)
-                addon = addon + self.temp_energy_coef * e_raw
-                pure_metrics["temp_energy_pure"] = e_raw.detach()
+
+            if self.anisotropic_transport_coef > 0:
+                if "T_hr" not in context:
+                    raise ValueError(
+                        "anisotropic_transport_coef > 0 requires context['T_hr'] "
+                        "(normalized COSMO-CLM high-res target)"
+                    )
+                at = self._field_losses.anisotropic_transport_loss(
+                    T_f,
+                    context["T_hr"],
+                    dx=self.at_dx,
+                    dy=self.at_dy,
+                    eps=self.at_loss_eps,
+                    lambda_mag=self.at_lambda_mag,
+                    lambda_dir=self.at_lambda_dir,
+                    direction_kind=self.at_direction_loss,
+                )
+                addon = addon + self.anisotropic_transport_coef * at["L_total"]
+                pure_metrics["at_mag_pure"] = at["L_mag"].detach()
+                pure_metrics["at_dir_pure"] = at["L_dir"].detach()
         return addon, pure_metrics
 
     @staticmethod
@@ -224,7 +260,8 @@ class LatentMeanFlowLitModule(LightningModule):
             # Same pattern as rmse/r2: always defined so callers use metrics["..."] directly.
             z_phys = torch.zeros((), device=metrics["rmse"].device, dtype=metrics["rmse"].dtype)
             metrics["temp_pde_pure"] = pure_phys.get("temp_pde_pure", z_phys)
-            metrics["temp_energy_pure"] = pure_phys.get("temp_energy_pure", z_phys)
+            metrics["at_mag_pure"] = pure_phys.get("at_mag_pure", z_phys)
+            metrics["at_dir_pure"] = pure_phys.get("at_dir_pure", z_phys)
 
         return total_loss, metrics
 
@@ -257,7 +294,8 @@ class LatentMeanFlowLitModule(LightningModule):
         self.log("val/rmse", metrics["rmse"], **log_params, sync_dist=True)
         self.log("val/r2", metrics["r2"], **log_params, sync_dist=True)
         self.log("val/temp_pde_pure", metrics["temp_pde_pure"], **log_params, sync_dist=True)
-        self.log("val/temp_energy_pure", metrics["temp_energy_pure"], **log_params, sync_dist=True)
+        self.log("val/at_mag_pure", metrics["at_mag_pure"], **log_params, sync_dist=True)
+        self.log("val/at_dir_pure", metrics["at_dir_pure"], **log_params, sync_dist=True)
         # Composite control monitor used by scheduler/early-stop/checkpoint selection.
         # Lower is better; better r2 reduces score via the negative sign.
         legacy_l2 = metrics.get("legacy_adaptive_l2")
@@ -270,7 +308,8 @@ class LatentMeanFlowLitModule(LightningModule):
             + self.control_metric_weights["rmse"] * metrics["rmse"]
             - self.control_metric_weights["r2"] * metrics["r2"]
             + self.control_metric_weights["temp_pde_pure"] * metrics["temp_pde_pure"]
-            + self.control_metric_weights["temp_energy_pure"] * metrics["temp_energy_pure"]
+            + self.control_metric_weights["at_mag_pure"] * metrics["at_mag_pure"]
+            + self.control_metric_weights["at_dir_pure"] * metrics["at_dir_pure"]
         )
         self.log("val/control_score", control_score, **log_params, sync_dist=True)
         if "legacy_adaptive_l2" in metrics:

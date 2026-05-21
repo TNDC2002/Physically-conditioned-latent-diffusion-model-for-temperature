@@ -21,7 +21,8 @@ def build_latent_target_and_context_dict(
     """Mirror ``LatentDiffusion.shared_step`` up to (but not including) the denoiser forward.
 
     :param batch: ``(x, y, z, ts)`` — coarse input, HR target, static, time/meta.
-    :returns: ``(latent_target, context_dict)`` with ``T_c`` and optional conditioner merge.
+    :returns: ``(latent_target, context_dict)`` with ``T_c`` (normalized ERA5), ``T_hr`` (normalized
+        COSMO-CLM target), and optional conditioner merge.
     """
     (x, y, z, _ts) = batch
 
@@ -35,7 +36,7 @@ def build_latent_target_and_context_dict(
     # else:
     #     latent_target = autoencoder.encode(y)[0]
 
-    context_dict: Dict[str, Any] = {"T_c": x}
+    context_dict: Dict[str, Any] = {"T_c": x, "T_hr": y}
     if conditional:
         if context_encoder is None:
             raise ValueError("conditional=True but context_encoder is None")

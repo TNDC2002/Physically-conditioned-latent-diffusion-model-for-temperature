@@ -16,9 +16,9 @@ tags: ["downscaling", "lmm_res_2mT"]
 
 # Lightning ``trainer.fit(..., ckpt_path=...)`` — full resume when ``load_optimizer_state: true``.
 # Set to ``null`` to train from scratch.
-ckpt_path: ${paths.root_dir}/logs/train/runs/2026-04-24_18-27-35/checkpoints/last.ckpt
+ckpt_path: ${paths.root_dir}/logs/train/runs/2026-05-14_07-18-49/checkpoints/best_LMM_res_2mT_epoch_020.ckpt
 
-load_optimizer_state: true
+load_optimizer_state: false
 
 # Optional: when resuming, pin Hydra output to the **existing** run folder (parent of ``checkpoints/``).
 # Uncomment so TensorBoard / checkpoints stay alongside ``ckpt_path``. Omit for a new timestamped run.
@@ -29,8 +29,8 @@ load_optimizer_state: true
 # Used at end of training for test selection (first ModelCheckpoint in trainer is the best-k one below).
 optimized_metric: val/control_score
 
-reset_scheduler_on_resume: false
-reset_lr_to_default_on_resume: false
+reset_scheduler_on_resume: true
+reset_lr_to_default_on_resume: true
 reset_lr_default_value: null
 
 paths:
@@ -50,10 +50,24 @@ data:
 model:
   use_ema: true
   pde_lambda: 0.1
-  temp_pde_coef: .000000001
-  temp_energy_coef: 0
+  temp_pde_coef: 0.0
   pde_mode: "temp"
   temp_pde_num_supercells: 8
+  # Anisotropic Transport: R̂ vs normalized COSMO-CLM (not ERA5 T_c)
+  anisotropic_transport_coef: 1.0e-9
+  at_lambda_mag: 1.0
+  at_lambda_dir: 1.0
+  at_loss_eps: 1.0e-12
+  at_direction_loss: cosine # cosine or unit_mse
+  at_dx: 2000.0
+  at_dy: -2000.0
+  control_metric_weights:
+    loss: 0.0
+    legacy_adaptive_l2: 0.0
+    rmse: 1.0
+    temp_pde_pure: 0.01
+    at_mag_pure: 1.0
+    at_dir_pure: 1.0
   autoencoder:
     unet_regr:
       ckpt_path: ${paths.pretrained_models_dir}UNET_2mT.ckpt
