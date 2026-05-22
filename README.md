@@ -189,7 +189,7 @@ For detailed usage patterns, advanced configurations, and troubleshooting tips, 
 srun --jobid= <id> --pty watch -n 1 nvidia-smi
 tensorboard --logdir logs/train/runs
 tail -n 1 -f /home/chuongtnd/git-repo/Physically-conditioned-latent-diffusion-model-for-temperature/slurm_logs/LMM_res_2mT-11647.out
-watch -n 1 "tail -n 1 /home/chuongtnd/git-repo/Physically-conditioned-latent-diffusion-model-for-temperature/slurm_logs/LMM_res_2mT-13137.out | tr '\r' '\n' | tail -n 1"
+watch -n 1 "tail -n 1 slurm_logs/LMM_res_2mT-15114.out | tr '\r' '\n' | tail -n 1"
 ```
 
 ```bash
