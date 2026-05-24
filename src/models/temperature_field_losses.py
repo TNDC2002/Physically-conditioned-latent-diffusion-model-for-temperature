@@ -192,18 +192,27 @@ class TemperatureFieldLosses:
         mag_g = torch.hypot(qx_g, qy_g)
         l_mag = F.mse_loss(torch.log(mag_p + eps), torch.log(mag_g + eps))
 
+        dot = qx_p * qx_g + qy_p * qy_g
+        cos = dot / (mag_p * mag_g + eps)
+        l_dir_cosine = (1.0 - cos).mean()
+        px, py = qx_p / (mag_p + eps), qy_p / (mag_p + eps)
+        gx, gy = qx_g / (mag_g + eps), qy_g / (mag_g + eps)
+        l_dir_unit_mse = F.mse_loss(px, gx) + F.mse_loss(py, gy)
+
         if direction_kind == "cosine":
-            dot = qx_p * qx_g + qy_p * qy_g
-            cos = dot / (mag_p * mag_g + eps)
-            l_dir = (1.0 - cos).mean()
+            l_dir = l_dir_cosine
         elif direction_kind == "unit_mse":
-            px, py = qx_p / (mag_p + eps), qy_p / (mag_p + eps)
-            gx, gy = qx_g / (mag_g + eps), qy_g / (mag_g + eps)
-            l_dir = F.mse_loss(px, gx) + F.mse_loss(py, gy)
+            l_dir = l_dir_unit_mse
         else:
             raise ValueError(
                 f"direction_kind must be 'cosine' or 'unit_mse', got {direction_kind!r}"
             )
 
         l_total = lambda_mag * l_mag + lambda_dir * l_dir
-        return {"L_mag": l_mag, "L_dir": l_dir, "L_total": l_total}
+        return {
+            "L_mag": l_mag,
+            "L_dir": l_dir,
+            "L_dir_cosine": l_dir_cosine,
+            "L_dir_unit_mse": l_dir_unit_mse,
+            "L_total": l_total,
+        }

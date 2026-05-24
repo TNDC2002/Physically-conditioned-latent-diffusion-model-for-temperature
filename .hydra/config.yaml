@@ -1,13 +1,16 @@
 task_name: train
 tags:
 - downscaling
-- ldm_res_2mT
+- lmm_res_2mT
 train: true
 test: true
 compile: false
-ckpt_path: /usr/project/xtmp/par55/DiffScaler/pretrained_models/LDM_residual_2mT.ckpt
+ckpt_path: ${paths.root_dir}/logs/train/runs/2026-05-14_07-18-49/checkpoints/best_LMM_res_2mT_epoch_020.ckpt
+reset_scheduler_on_resume: true
+reset_lr_to_default_on_resume: true
+reset_lr_default_value: null
 seed: 42
-optimized_metric: val/loss
+optimized_metric: val/control_score
 data:
   _target_: src.data.downscaling_datamodule.DownscalingDataModule
   data_dir: ${paths.data_dir}
@@ -33,16 +36,16 @@ data:
     - W850
     high_res:
     - 2mT
-  batch_size: 8
-  num_workers: 2
+  batch_size: 17
+  num_workers: 8
   pin_memory: true
   crop_size: 512
   nn_lowres: false
+  skip_dynamic_load: false
 model:
-  _target_: src.models.ldm_module.LatentDiffusion
-  parameterization: v
-  denoiser:
-    _target_: src.models.components.ldm.denoiser.UNetModel
+  _target_: src.models.lmm_module.LatentMeanFlowLitModule
+  mf_unet:
+    _target_: src.models.components.ldm.denoiser.MFUNet
     in_channels: 32
     model_channels: 256
     out_channels: 32
@@ -60,6 +63,16 @@ model:
     - 256
     - 512
     - 1024
+    time_scale: 1000
+    separate_r_mlp: false
+  meanflow_core:
+    _target_: src.models.components.meanflow.meanflow_core.MeanFlowCore
+    flow_ratio: 0.5
+    time_dist: lognorm
+    time_mu: -0.4
+    time_sigma: 1.0
+  use_meanflow_paper_core: true
+  meanflow_paper: null
   autoencoder:
     _target_: src.models.ae_module.AutoencoderKL
     encoder:
@@ -82,7 +95,7 @@ model:
       loss:
         _target_: torch.nn.MSELoss
         reduction: mean
-      optimizer: None
+      optimizer: null
       ckpt_path: ${paths.pretrained_models_dir}UNET_2mT.ckpt
     ae_flag: residual
   context_encoder:
@@ -94,7 +107,7 @@ model:
         in_dim: 18
         levels: 3
         ch_mult: 3
-      decoder: None
+      decoder: null
     - _target_: src.models.ae_module.EncoderLRES
     train_autoenc: true
     cascade_depth: 3
@@ -110,24 +123,42 @@ model:
     - 1
     embed_dim_out: 256
   lr: 0.0001
-  ae_load_state_file: ${paths.pretrained_models_dir}VAE_residual_2mT.ckpt
-  pde_lambda: 0.1
-  temp_pde_coef: 1.0e-11
-  temp_energy_coef: 0
+  lr_warmup: 0
+  use_ema: true
+  loss_type: l2
+  control_metric_weights:
+    loss: 0.0
+    legacy_adaptive_l2: 0.0
+    rmse: 1.0
+    r2: 0.0
+    temp_pde_pure: 0.01
+    at_mag_pure: 0.1
+    at_dir_pure: 1.0
+  pde_lambda: 0.0
   pde_mode: temp
+  temp_pde_coef: 0.0
+  temp_pde_num_supercells: 8
+  anisotropic_transport_coef: 1.0e-10
+  at_lambda_mag: 0.001
+  at_lambda_dir: 1.0
+  at_loss_eps: 1.0e-12
+  at_direction_loss: unit_mse
+  at_dx: 2000.0
+  at_dy: -2000.0
+  ae_load_state_file: ${paths.pretrained_models_dir}VAE_residual_2mT.ckpt
   trainable_parts:
-  - denoiser.output_blocks
-  - autoencoder.decoder
-  - denoiser.middle_block
+  - mf_unet.middle_block
+  - mf_unet.output_blocks
+  - mf_unet.out
 callbacks:
   model_checkpoint:
     _target_: lightning.pytorch.callbacks.ModelCheckpoint
     dirpath: ${paths.output_dir}/checkpoints
-    filename: epoch_{epoch:03d}
-    monitor: val/loss
+    filename: best_LMM_res_2mT_epoch_{epoch:03d}
+    monitor: val/control_score
     verbose: false
-    save_last: true
-    save_top_k: 3
+    save_last: false
+    save_top_k: 1
     mode: min
     auto_insert_metric_name: false
     save_weights_only: false
@@ -137,10 +168,10 @@ callbacks:
     save_on_train_epoch_end: null
   early_stopping:
     _target_: lightning.pytorch.callbacks.EarlyStopping
-    monitor: val/loss
+    monitor: val/control_score
     min_delta: 0.0
-    patience: 5
-    verbose: false
+    patience: 10
+    verbose: true
     mode: min
     strict: true
     check_finite: true
@@ -150,8 +181,30 @@ callbacks:
   model_summary:
     _target_: lightning.pytorch.callbacks.RichModelSummary
     max_depth: -1
-  rich_progress_bar:
-    _target_: lightning.pytorch.callbacks.RichProgressBar
+  rich_progress_bar: null
+  model_checkpoint_periodic:
+    _target_: lightning.pytorch.callbacks.ModelCheckpoint
+    dirpath: ${paths.output_dir}/checkpoints
+    filename: LMM_res_2mT_every5_epoch_{epoch:03d}
+    monitor: null
+    mode: min
+    save_top_k: -1
+    save_last: false
+    auto_insert_metric_name: false
+    verbose: false
+    every_n_epochs: 5
+    save_on_train_epoch_end: false
+  model_checkpoint_last:
+    _target_: lightning.pytorch.callbacks.ModelCheckpoint
+    dirpath: ${paths.output_dir}/checkpoints
+    monitor: null
+    mode: min
+    save_top_k: 0
+    save_last: true
+    auto_insert_metric_name: false
+    verbose: false
+    every_n_epochs: 0
+    save_on_train_epoch_end: false
 logger:
   tensorboard:
     _target_: lightning.pytorch.loggers.tensorboard.TensorBoardLogger
@@ -164,15 +217,15 @@ trainer:
   _target_: lightning.pytorch.trainer.Trainer
   default_root_dir: ${paths.output_dir}
   min_epochs: 1
-  max_epochs: 10
+  max_epochs: 100
   accelerator: gpu
-  devices: 4
+  devices: 2
   strategy: ddp_find_unused_parameters_true
   check_val_every_n_epoch: 1
   deterministic: false
 paths:
   root_dir: ${oc.env:PROJECT_ROOT}
-  data_dir: ${paths.root_dir}/LDM-downscaling/
+  data_dir: ${paths.root_dir}/LDM-downscaling/full_Dataset/
   log_dir: ${paths.root_dir}/logs/
   output_dir: ${hydra:runtime.output_dir}
   work_dir: ${hydra:runtime.cwd}

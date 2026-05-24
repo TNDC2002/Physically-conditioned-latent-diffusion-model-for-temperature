@@ -9,7 +9,6 @@ import torch
 from lightning import LightningModule
 
 from .components.ldm.denoiser import LitEma
-from .components.meanflow.meanflow_core import MeanFlowCore
 from .components.meanflow.meanflow_paper_core import MeanFlowPaperCore
 from .components.ldm.denoiser.lmm_infer import generate_latent_one_step
 from .latent_residual_inputs import build_latent_target_and_context_dict
@@ -86,7 +85,6 @@ class LatentMeanFlowLitModule(LightningModule):
             if self.use_meanflow_paper_core
             else meanflow_core
         )
-        self._legacy_meanflow_core = MeanFlowCore()
         self.mf_unet = mf_unet
         self.autoencoder = autoencoder.requires_grad_(False)
         if ae_load_state_file is not None:
@@ -211,7 +209,34 @@ class LatentMeanFlowLitModule(LightningModule):
                 addon = addon + self.anisotropic_transport_coef * at["L_total"]
                 pure_metrics["at_mag_pure"] = at["L_mag"].detach()
                 pure_metrics["at_dir_pure"] = at["L_dir"].detach()
+                pure_metrics["at_dir_pure_cosine"] = at["L_dir_cosine"].detach()
+                pure_metrics["at_dir_pure_unit_mse"] = at["L_dir_unit_mse"].detach()
         return addon, pure_metrics
+
+    @staticmethod
+    def _log10_scalar(value: torch.Tensor, eps: float) -> torch.Tensor:
+        """log10(|value|) with floor ``eps``; keeps device/dtype of ``value``."""
+        out = torch.log10(value.detach().float().abs().clamp(min=eps))
+        return out.to(device=value.device, dtype=value.dtype)
+
+    @staticmethod
+    def _log10_direction_cosine_loss(value: torch.Tensor, eps: float) -> torch.Tensor:
+        """Display-friendly log for ``L_dir_cosine = mean(1 - cos)`` in ``[0, 2]``.
+
+        Plain ``log10(L)`` is flat when ``L ≈ 1`` (random alignment) because ``log10(1)=0``.
+        For small ``L``, use ``-log10(L)``; for ``L >= 0.5``, log distance from the random baseline ``1``.
+        """
+        v = value.detach().float().abs()
+        small_regime = v < 0.5
+        log_small = -torch.log10(v.clamp(min=eps))
+        log_large = torch.log10((v - 1.0).abs().clamp(min=eps))
+        out = torch.where(small_regime, log_small, log_large)
+        return out.to(device=value.device, dtype=value.dtype)
+
+    @property
+    def _uses_legacy_meanflow_loss(self) -> bool:
+        """Old ``MeanFlowCore`` is the training loss (not the paper core)."""
+        return not self.use_meanflow_paper_core
 
     @staticmethod
     def _compute_rmse_r2(u_pred: torch.Tensor, u_tgt: torch.Tensor) -> Dict[str, torch.Tensor]:
@@ -255,13 +280,15 @@ class LatentMeanFlowLitModule(LightningModule):
 
         with torch.no_grad():
             metrics = self._compute_rmse_r2(u_pred, u_tgt)
-            if self.use_meanflow_paper_core:
-                metrics["legacy_adaptive_l2"] = self._legacy_meanflow_core.adaptive_l2_loss(error.detach())
+            if self._uses_legacy_meanflow_loss:
+                metrics["legacy_adaptive_l2"] = mf_loss.detach()
             # Same pattern as rmse/r2: always defined so callers use metrics["..."] directly.
             z_phys = torch.zeros((), device=metrics["rmse"].device, dtype=metrics["rmse"].dtype)
             metrics["temp_pde_pure"] = pure_phys.get("temp_pde_pure", z_phys)
             metrics["at_mag_pure"] = pure_phys.get("at_mag_pure", z_phys)
             metrics["at_dir_pure"] = pure_phys.get("at_dir_pure", z_phys)
+            metrics["at_dir_pure_cosine"] = pure_phys.get("at_dir_pure_cosine", z_phys)
+            metrics["at_dir_pure_unit_mse"] = pure_phys.get("at_dir_pure_unit_mse", z_phys)
 
         return total_loss, metrics
 
@@ -289,28 +316,40 @@ class LatentMeanFlowLitModule(LightningModule):
         with self.ema_scope():
             loss_ema, metrics_ema = self.shared_step(batch, create_graph=False)
         log_params = {"on_step": False, "on_epoch": True, "prog_bar": True}
-        self.log("val/loss", loss, **log_params, sync_dist=True)
-        self.log("val/loss_ema", loss_ema, **log_params, sync_dist=True)
+        self.log("val/loss", self._log10_scalar(loss, self.at_loss_eps), **log_params, sync_dist=True)
+        self.log("val/loss_ema", self._log10_scalar(loss_ema, self.at_loss_eps), **log_params, sync_dist=True)
         self.log("val/rmse", metrics["rmse"], **log_params, sync_dist=True)
         self.log("val/r2", metrics["r2"], **log_params, sync_dist=True)
         self.log("val/temp_pde_pure", metrics["temp_pde_pure"], **log_params, sync_dist=True)
         self.log("val/at_mag_pure", metrics["at_mag_pure"], **log_params, sync_dist=True)
-        self.log("val/at_dir_pure", metrics["at_dir_pure"], **log_params, sync_dist=True)
+        self.log("val/at_dir_pure_cosine", metrics["at_dir_pure_cosine"], **log_params, sync_dist=True)
+        self.log(
+            "val/at_dir_pure_cosine_log",
+            self._log10_direction_cosine_loss(metrics["at_dir_pure_cosine"], self.at_loss_eps),
+            **log_params,
+            sync_dist=True,
+        )
+        self.log(
+            "val/at_dir_pure_unit_mse",
+            metrics["at_dir_pure_unit_mse"],
+            **log_params,
+            sync_dist=True,
+        )
         # Composite control monitor used by scheduler/early-stop/checkpoint selection.
         # Lower is better; better r2 reduces score via the negative sign.
-        legacy_l2 = metrics.get("legacy_adaptive_l2")
-        if legacy_l2 is None:
-            # Fallback for setups where legacy metric is not emitted.
-            legacy_l2 = torch.zeros_like(loss)
         control_score = (
             self.control_metric_weights["loss"] * loss
-            + self.control_metric_weights["legacy_adaptive_l2"] * legacy_l2
             + self.control_metric_weights["rmse"] * metrics["rmse"]
             - self.control_metric_weights["r2"] * metrics["r2"]
             + self.control_metric_weights["temp_pde_pure"] * metrics["temp_pde_pure"]
             + self.control_metric_weights["at_mag_pure"] * metrics["at_mag_pure"]
             + self.control_metric_weights["at_dir_pure"] * metrics["at_dir_pure"]
         )
+        legacy_l2 = metrics.get("legacy_adaptive_l2")
+        if legacy_l2 is not None:
+            control_score = control_score + (
+                self.control_metric_weights["legacy_adaptive_l2"] * legacy_l2
+            )
         self.log("val/control_score", control_score, **log_params, sync_dist=True)
         if "legacy_adaptive_l2" in metrics:
             self.log("val/legacy_adaptive_l2", metrics["legacy_adaptive_l2"], **log_params, sync_dist=True)
@@ -320,8 +359,8 @@ class LatentMeanFlowLitModule(LightningModule):
         with self.ema_scope():
             loss_ema, metrics_ema = self.shared_step(batch, create_graph=False)
         log_params = {"on_step": False, "on_epoch": True, "prog_bar": True}
-        self.log("test/loss", loss, **log_params, sync_dist=True)
-        self.log("test/loss_ema", loss_ema, **log_params, sync_dist=True)
+        self.log("test/loss", self._log10_scalar(loss, self.at_loss_eps), **log_params, sync_dist=True)
+        self.log("test/loss_ema", self._log10_scalar(loss_ema, self.at_loss_eps), **log_params, sync_dist=True)
         self.log("test/rmse", metrics["rmse"], **log_params, sync_dist=True)
         self.log("test/r2", metrics["r2"], **log_params, sync_dist=True)
         if "legacy_adaptive_l2" in metrics:

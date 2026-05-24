@@ -77,10 +77,11 @@ lr_warmup: 0
 use_ema: true
 loss_type: l2
 # Composite control-score weights (shared by scheduler/early-stop/checkpoint):
-# val/loss, val/legacy_adaptive_l2, val/rmse, (-val/r2), and unscaled physics scalars.
+# val/loss, val/rmse, (-val/r2), unscaled physics scalars; legacy_adaptive_l2 only when
+# use_meanflow_paper_core=false (old MeanFlowCore is the training loss).
 control_metric_weights:
   loss: 1.0
-  legacy_adaptive_l2: 1.0
+  legacy_adaptive_l2: 0.0
   rmse: 1.0
   r2: 1.0
   temp_pde_pure: 1.0

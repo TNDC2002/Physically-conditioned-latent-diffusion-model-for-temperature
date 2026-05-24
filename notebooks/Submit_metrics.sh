@@ -12,11 +12,11 @@
 # --- Config ---
 # Submit.sh lives in <repo>/notebooks/ → repo root is one level up (not ../..).
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-# PARTITION="${PARTITION:-main}"
-PARTITION="${PARTITION:-mig}"
+PARTITION="${PARTITION:-main}"
+# PARTITION="${PARTITION:-mig}"
 NUM_GPUS="${NUM_GPUS:-1}"
-# GPU_TYPE="${GPU_TYPE:-nvidia_h100_80gb_hbm3}"
-GPU_TYPE="${GPU_TYPE:-nvidia_h100_80gb_hbm3_3g.40gb}"
+GPU_TYPE="${GPU_TYPE:-nvidia_h100_80gb_hbm3}"
+# GPU_TYPE="${GPU_TYPE:-nvidia_h100_80gb_hbm3_3g.40gb}"
 MEM="${MEM:-64G}"
 CPUS_PER_TASK="${CPUS_PER_TASK:-8}"
 # Many clusters reject 0:00:00; set a walltime if your site requires it (e.g. TIME=8:00:00).
@@ -84,15 +84,22 @@ export TQDM_DISABLE=1
 # Agg can render files, but it may not emit notebook display_data consistently.
 export MPLBACKEND=module://matplotlib_inline.backend_inline
 
+# Sanitize a temp copy so stale local outputs cannot break nbconvert validation.
+TMP_NB="\$(mktemp --suffix=.ipynb)"
+cp "$NOTEBOOK" "\$TMP_NB"
+python "$REPO_ROOT/scripts/sanitize_notebook.py" "\$TMP_NB" --clear-outputs
+
 jupyter nbconvert \\
     --to notebook \\
-    --execute "$NOTEBOOK" \\
+    --execute "\$TMP_NB" \\
     --output-dir "\$OUT_DIR" \\
     --output "\$TMP_OUT_FILE" \\
     --ExecutePreprocessor.timeout=-1 \\
     --ExecutePreprocessor.iopub_timeout=86400 \\
     --ExecutePreprocessor.store_widget_state=False \\
     --ExecutePreprocessor.kernel_name=python3
+
+rm -f "\$TMP_NB"
 
 # Validate executed notebook JSON before publishing final output.
 python -c "import json; json.load(open('$REPO_ROOT/outputs/\$TMP_OUT_FILE', encoding='utf-8')); print('Validated executed notebook JSON')"

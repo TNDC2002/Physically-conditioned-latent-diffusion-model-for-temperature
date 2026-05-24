@@ -4,9 +4,10 @@
 # lives in configs/experiment/downscaling_LMM_res_2mT.yaml — this file is only cluster + one data override.
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-LOG_DIR="${LOG_DIR:-$REPO_ROOT/slurm_logs}"
+# LOG_DIR="${LOG_DIR:-$REPO_ROOT/slurm_logs}"
+LOG_DIR="${LOG_DIR:-$REPO_ROOT/LDM-downscaling/slurm_logs}"
 PARTITION="${PARTITION:-main}"
-NUM_GPUS="${NUM_GPUS:-1}"
+NUM_GPUS="${NUM_GPUS:-2}"
 GPU_TYPE="${GPU_TYPE:-nvidia_h100_80gb_hbm3}"
 MEM="${MEM:-64G}"
 CPUS_PER_TASK="${CPUS_PER_TASK:-12}"

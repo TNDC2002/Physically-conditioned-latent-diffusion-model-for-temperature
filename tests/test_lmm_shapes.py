@@ -26,10 +26,11 @@ def test_anisotropic_transport_loss():
     out = phys.anisotropic_transport_loss(
         R_hat, T_hr, dx=2000.0, dy=-2000.0, lambda_mag=1.0, lambda_dir=0.5, direction_kind="cosine"
     )
-    assert set(out.keys()) == {"L_mag", "L_dir", "L_total"}
+    assert set(out.keys()) == {"L_mag", "L_dir", "L_dir_cosine", "L_dir_unit_mse", "L_total"}
     for v in out.values():
         assert v.ndim == 0
         assert torch.isfinite(v)
+    assert torch.allclose(out["L_dir"], out["L_dir_cosine"])
     assert torch.allclose(out["L_total"], 1.0 * out["L_mag"] + 0.5 * out["L_dir"])
 
 
