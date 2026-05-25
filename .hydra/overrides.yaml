@@ -1,2 +1,2 @@
 - experiment=downscaling_LMM_res_2mT_pretrain
-- data.num_workers=8
+- data.num_workers=12

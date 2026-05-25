@@ -247,20 +247,40 @@ def _vectors_for_quiver_display(
     return u_hat * mag_disp, v_hat * mag_disp, tag, key_length
 
 
+_N_Q_PANELS = 3
 _FLUX_PANEL_META = [
     ("A", "Flux q (raw qx, qy)"),
     ("B", "Flux q (raw qx, qy)"),
+    ("G", "Flux q (raw qx, qy)"),
     ("C", "Grad T (raw dTdx, dTdy)"),
     ("D", "Grad T (raw dTdx, dTdy)"),
     ("E", "trace(J) + raw grad T (recovered J)"),
     ("F", "trace(J) + raw grad T (recovered J)"),
 ]
 
+# Default deep-zoom window (EPSG:3035 m): centre of WS10 zoom box, ~150 km span
+_DEFAULT_Q_DEEP_ZOOM_X = (4_225_000.0, 4_375_000.0)
+_DEFAULT_Q_DEEP_ZOOM_Y = (1_828_500.0, 1_989_500.0)
+_DEFAULT_Q_DEEP_ZOOM_STRIDE = 3
+
 
 def _flux_panel_label(panel: int) -> tuple[str, str, str]:
     letter, name = _FLUX_PANEL_META[panel]
-    region = "zoom" if panel % 2 else "domain"
+    if panel == 0 or panel in (3, 5):
+        region = "domain"
+    elif panel == 2:
+        region = "deep zoom"
+    else:
+        region = "zoom"
     return letter, name, region
+
+
+def _flux_panel_kind(panel: int) -> str:
+    if panel < _N_Q_PANELS:
+        return "q"
+    if panel < 5:
+        return "grad"
+    return "j"
 
 
 def _annotate_flux_panel(ax, panel: int) -> None:
@@ -292,15 +312,26 @@ def _numpy_to_field_map(fields: dict[str, np.ndarray], target_grid, t_var: str =
     return field_map
 
 
-def _panel_limits(zoom: bool, target_grid):
-    if not zoom:
+def _panel_limits(
+    panel: int,
+    target_grid,
+    *,
+    q_deep_zoom_x: tuple[float, float] = _DEFAULT_Q_DEEP_ZOOM_X,
+    q_deep_zoom_y: tuple[float, float] = _DEFAULT_Q_DEEP_ZOOM_Y,
+    q_deep_zoom_stride: int = _DEFAULT_Q_DEEP_ZOOM_STRIDE,
+):
+    if panel == 2:
+        x_lim = [q_deep_zoom_x[0], q_deep_zoom_x[1]]
+        y_lim = [q_deep_zoom_y[0], q_deep_zoom_y[1]]
+        pick_stride = max(1, int(q_deep_zoom_stride))
+    elif panel in (1, 4, 6):
+        x_lim = [4_150_000, 4_450_000]
+        y_lim = [1_748_000, 2_070_000]
+        pick_stride = 10
+    else:
         x_lim = [target_grid.coords["x"].min().values, target_grid.coords["x"].max().values]
         y_lim = [target_grid.coords["y"].min().values, target_grid.coords["y"].max().values]
         pick_stride = 50
-    else:
-        x_lim = [4150000, 4450000]
-        y_lim = [1748000, 2070000]
-        pick_stride = 10
     return x_lim, y_lim, pick_stride
 
 
@@ -324,6 +355,45 @@ def _style_q_panel_ax(
 _QUIVER_SCALE = 200
 
 
+def _q_mask_skip_from_quantile(qx: np.ndarray, qy: np.ndarray, skip_quantile_pct: float):
+    """Mask bottom ``skip_quantile_pct`` of |q| per field (per time slice / model)."""
+    if skip_quantile_pct <= 0:
+        return qx, qy, np.zeros(np.shape(qx), dtype=bool), None
+    q_mag = np.hypot(np.asarray(qx, float), np.asarray(qy, float))
+    thr = float(np.percentile(q_mag, skip_quantile_pct))
+    skip = q_mag <= thr
+    qx_out = np.asarray(qx, dtype=float).copy()
+    qy_out = np.asarray(qy, dtype=float).copy()
+    qx_out[skip] = np.nan
+    qy_out[skip] = np.nan
+    return qx_out, qy_out, skip, thr
+
+
+def _plot_q_mask_skip_dots(ax, field_map: xr.Dataset, skip_mask: np.ndarray, pick_stride: int):
+    """Purple markers at grid points where |q| was below the skip quantile."""
+    if skip_mask is None or not np.any(skip_mask):
+        return
+    skip_da = xr.DataArray(
+        skip_mask.astype(bool),
+        coords={"lat": field_map["lat"], "lon": field_map["lon"]},
+        dims=["lat", "lon"],
+    )
+    thinned = field_map.thin(pick_stride)
+    skip_thin = skip_da.thin(pick_stride).values
+    if not np.any(skip_thin):
+        return
+    lon_2d, lat_2d = np.meshgrid(thinned["lon"].values, thinned["lat"].values)
+    ax.scatter(
+        lon_2d[skip_thin],
+        lat_2d[skip_thin],
+        s=12,
+        c="purple",
+        alpha=0.85,
+        linewidths=0,
+        zorder=10,
+    )
+
+
 def _plot_jet_T_quiver_panel(
     ax,
     field_map: xr.Dataset,
@@ -339,6 +409,7 @@ def _plot_jet_T_quiver_panel(
     x_lim,
     y_lim,
     quiver_color: str | None = None,
+    q_skip_mask: np.ndarray | None = None,
 ):
     """WS10-style panel: ``jet`` 2mT background + vector overlay."""
     mappable = field_map[t_var].plot.imshow(
@@ -365,6 +436,8 @@ def _plot_jet_T_quiver_panel(
         quiver_kw["color"] = quiver_color
     q_plot = field_map.thin(pick_stride).plot.quiver(**quiver_kw)
     _add_ws10_quiverkey(q_plot, quiver_ref, quiver_label)
+    if q_skip_mask is not None:
+        _plot_q_mask_skip_dots(ax, field_map, q_skip_mask, pick_stride)
     _add_ws10_key_box(ax, x_lim, y_lim)
     return mappable
 
@@ -461,8 +534,14 @@ def show_q_snapshots(
     display_magnitude_gamma: float = 0.45,
     display_min_arrow_frac: float = 0.15,
     display_max_arrow_frac: float = 1.0,
+    q_mask_skip_quantile_pct: float = 0.0,
+    q_deep_zoom_x: tuple[float, float] | None = None,
+    q_deep_zoom_y: tuple[float, float] | None = None,
+    q_deep_zoom_stride: int | None = None,
 ):
-    """Plot precomputed flux fields (6 panels per model, 2×3 WS10 layout).
+    """Plot precomputed flux fields (7 panels per model, 3×3 WS10 layout).
+
+    Row 1: flux **q** — domain | zoom | **deep zoom** (panel G, denser quiver).
 
     Physics (∇T, recovered **J**, q) must be computed in the notebook; pass
     ``flux_by_model[model]`` with keys ``T``, ``dTdx``, ``dTdy``, ``J_trace``, ``qx``, ``qy``.
@@ -472,6 +551,10 @@ def show_q_snapshots(
     histograms). ``use_quiver_lens=True`` (default) applies power-law compression (γ) plus
     min/max arrow floors so weak and extreme vectors remain visible.
     Set ``display_magnitude_gamma=1`` for linear lens; manual ``*_display_boost`` overrides lens.
+
+    ``q_mask_skip_quantile_pct`` (e.g. ``50``): per model / time slice, hide the bottom
+    that fraction of |q| (arrows omitted); skipped grid points are drawn as purple dots.
+    ``0`` disables masking.
     """
     spat_dist_df = spat_dist_df[spat_dist_df["variable"] == variable].copy()
     if spat_dist_df.empty:
@@ -487,9 +570,16 @@ def show_q_snapshots(
     min_value = min(spat_dist_df["min"])
     max_value = max(spat_dist_df["max"])
 
-    n_panels = 6
+    q_deep_x = q_deep_zoom_x if q_deep_zoom_x is not None else _DEFAULT_Q_DEEP_ZOOM_X
+    q_deep_y = q_deep_zoom_y if q_deep_zoom_y is not None else _DEFAULT_Q_DEEP_ZOOM_Y
+    q_deep_stride = (
+        q_deep_zoom_stride if q_deep_zoom_stride is not None else _DEFAULT_Q_DEEP_ZOOM_STRIDE
+    )
+
+    n_panels = 7
     ncols = 3
-    nrows_per_model = 2
+    nrows_per_model = 3
+    n_slots_per_model = nrows_per_model * ncols
     nrows = rig_max * nrows_per_model
     fig, axs = plt.subplots(
         nrows=nrows, ncols=ncols, figsize=(5 * ncols, 5 * nrows), constrained_layout=True
@@ -506,6 +596,11 @@ def show_q_snapshots(
         )
     else:
         arrow_note = "Arrows: display lens OFF — raw qx/qy (true relative magnitudes; may hide weak vectors)"
+    if q_mask_skip_quantile_pct > 0:
+        arrow_note += (
+            f" | q mask: skip bottom {q_mask_skip_quantile_pct:g}% |q| per slice "
+            "(purple dots = masked)"
+        )
     fig.text(0.5, 0.005, arrow_note, ha="center", fontsize=10, style="italic")
 
     im_mag = None
@@ -531,8 +626,18 @@ def show_q_snapshots(
                 f"(γ={display_magnitude_gamma:g}, min_frac={display_min_arrow_frac:g}); "
                 "they are not proportional to physical |q|. Set use_quiver_lens=False to verify."
             )
+        qx_plot, qy_plot, q_skip_mask, q_skip_thr = _q_mask_skip_from_quantile(
+            flux["qx"], flux["qy"], q_mask_skip_quantile_pct
+        )
+        if q_mask_skip_quantile_pct > 0:
+            n_skip = int(np.sum(q_skip_mask))
+            print(
+                f"[{sim}] q mask: skip bottom {q_mask_skip_quantile_pct:g}% |q| "
+                f"(|q| <= {q_skip_thr:.3e}) -> {n_skip}/{q_skip_mask.size} pixels "
+                f"({100.0 * n_skip / q_skip_mask.size:.1f}%)"
+            )
         qx_d, qy_d, q_tag, q_key = _vectors_for_quiver_display(
-            flux["qx"], flux["qy"], q_boost, **disp_kw
+            qx_plot, qy_plot, q_boost, **disp_kw
         )
         gx_d, gy_d, g_tag, g_key = _vectors_for_quiver_display(
             flux["dTdx"], flux["dTdy"], g_boost, **disp_kw
@@ -552,19 +657,29 @@ def show_q_snapshots(
 
         j_tr_vmax = float(np.nanpercentile(flux["J_trace"], 99)) or 1.0
 
-        for panel in range(n_panels):
+        for panel in range(n_slots_per_model):
             grid_row = sim_row * nrows_per_model + panel // ncols
             col = panel % ncols
-            zoom = panel % 2 == 1
-            x_lim, y_lim, pick_stride = _panel_limits(zoom, target_grid)
             ax = axs[grid_row, col]
-            row_ylabel = sim if panel < ncols else "grad T & J"
+            if panel >= n_panels:
+                ax.set_visible(False)
+                continue
+
+            x_lim, y_lim, pick_stride = _panel_limits(
+                panel,
+                target_grid,
+                q_deep_zoom_x=q_deep_x,
+                q_deep_zoom_y=q_deep_y,
+                q_deep_zoom_stride=q_deep_stride,
+            )
+            row_ylabel = sim if panel // ncols == 0 else ("grad T & J" if panel // ncols == 1 else "")
             _style_q_panel_ax(
                 ax, x_lim, y_lim, gdf_bn, borders_file, sim, col, ylabel=row_ylabel if col == 0 else None
             )
             _annotate_flux_panel(ax, panel)
 
-            if panel < 2:
+            kind = _flux_panel_kind(panel)
+            if kind == "q":
                 im_mag = _plot_jet_T_quiver_panel(
                     ax,
                     field_q,
@@ -578,8 +693,9 @@ def show_q_snapshots(
                     quiver_label=f"q {q_tag}",
                     x_lim=x_lim,
                     y_lim=y_lim,
+                    q_skip_mask=q_skip_mask if q_mask_skip_quantile_pct > 0 else None,
                 )
-            elif panel < 4:
+            elif kind == "grad":
                 im_mag = _plot_jet_T_quiver_panel(
                     ax,
                     field_grad,

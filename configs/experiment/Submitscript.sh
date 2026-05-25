@@ -9,11 +9,11 @@ LOG_DIR="${LOG_DIR:-$REPO_ROOT/LDM-downscaling/slurm_logs}"
 PARTITION="${PARTITION:-main}"
 NUM_GPUS="${NUM_GPUS:-2}"
 GPU_TYPE="${GPU_TYPE:-nvidia_h100_80gb_hbm3}"
-MEM="${MEM:-64G}"
-CPUS_PER_TASK="${CPUS_PER_TASK:-12}"
+MEM="${MEM:-256G}"
+CPUS_PER_TASK="${CPUS_PER_TASK:-16}"
 
 # Optional: override dataloader workers for the allocation (everything else from the experiment YAML).
-DATA_NUM_WORKERS="${DATA_NUM_WORKERS:-8}"
+DATA_NUM_WORKERS="${DATA_NUM_WORKERS:-6}"
 
 if [[ "$DATA_NUM_WORKERS" -ge "$CPUS_PER_TASK" ]]; then
     DATA_NUM_WORKERS=$((CPUS_PER_TASK - 1))
