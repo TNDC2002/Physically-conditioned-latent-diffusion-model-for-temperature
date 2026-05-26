@@ -355,18 +355,138 @@ def _style_q_panel_ax(
 _QUIVER_SCALE = 200
 
 
-def _q_mask_skip_from_quantile(qx: np.ndarray, qy: np.ndarray, skip_quantile_pct: float):
-    """Mask bottom ``skip_quantile_pct`` of |q| per field (per time slice / model)."""
-    if skip_quantile_pct <= 0:
-        return qx, qy, np.zeros(np.shape(qx), dtype=bool), None
-    q_mag = np.hypot(np.asarray(qx, float), np.asarray(qy, float))
-    thr = float(np.percentile(q_mag, skip_quantile_pct))
-    skip = q_mag <= thr
+def _normalize_q_mask_mode(
+    mode: str,
+    *,
+    skip_quantile_pct: float = 0.0,
+    abs_threshold: float | None = None,
+) -> str:
+    """Return ``none``, ``quantile``, or ``absolute``."""
+    mode = (mode or "none").strip().lower()
+    if mode == "none" and skip_quantile_pct > 0:
+        mode = "quantile"
+    if mode not in ("none", "quantile", "absolute"):
+        raise ValueError(f"q_mask_mode must be 'none', 'quantile', or 'absolute', got {mode!r}")
+    if mode == "quantile" and skip_quantile_pct <= 0:
+        raise ValueError("quantile masking requires skip_quantile_pct > 0")
+    if mode == "absolute":
+        if abs_threshold is None:
+            raise ValueError("absolute masking requires q_mask_abs_threshold")
+        if abs_threshold < 0:
+            raise ValueError(f"q_mask_abs_threshold must be >= 0, got {abs_threshold}")
+    return mode
+
+
+def _q_mag_and_mask(
+    qx: np.ndarray,
+    qy: np.ndarray,
+    *,
+    mode: str = "none",
+    skip_quantile_pct: float = 0.0,
+    abs_threshold: float | None = None,
+) -> tuple[np.ndarray, np.ndarray, float | None, str]:
+    """Return (q_mag, skip_mask, threshold, mode). Mask where |q| <= threshold."""
+    mode = _normalize_q_mask_mode(
+        mode, skip_quantile_pct=skip_quantile_pct, abs_threshold=abs_threshold
+    )
+    q_mag = np.hypot(np.asarray(qx, dtype=float), np.asarray(qy, dtype=float))
+    if mode == "none":
+        return q_mag, np.zeros(q_mag.shape, dtype=bool), None, mode
+    if mode == "absolute":
+        thr = float(abs_threshold)
+    else:
+        thr = float(np.percentile(q_mag, skip_quantile_pct))
+    return q_mag, q_mag <= thr, thr, mode
+
+
+def summarize_q_mask_thresholds(
+    flux_by_model: dict[str, dict[str, np.ndarray]],
+    *,
+    mode: str = "none",
+    skip_quantile_pct: float = 0.0,
+    abs_threshold: float | None = None,
+    time_label: str | None = None,
+) -> pd.DataFrame:
+    """Log |q| cutoff used for masking (pixels with |q| <= threshold are filtered out)."""
+    mode = _normalize_q_mask_mode(
+        mode, skip_quantile_pct=skip_quantile_pct, abs_threshold=abs_threshold
+    )
+    rows = []
+    for model, flux in flux_by_model.items():
+        q_mag, skip, thr, _ = _q_mag_and_mask(
+            flux["qx"],
+            flux["qy"],
+            mode=mode,
+            skip_quantile_pct=skip_quantile_pct,
+            abs_threshold=abs_threshold,
+        )
+        keep = ~skip
+        rows.append(
+            {
+                "time": time_label,
+                "model": model,
+                "mask_mode": mode,
+                "skip_quantile_%": skip_quantile_pct if mode == "quantile" else np.nan,
+                "abs_threshold_input": abs_threshold if mode == "absolute" else np.nan,
+                "|q|_filter_threshold": thr,
+                "n_pixels_masked": int(skip.sum()),
+                "frac_masked": float(skip.mean()),
+                "max_|q|_among_masked": float(np.max(q_mag[skip])) if skip.any() else np.nan,
+                "min_|q|_among_kept": float(np.min(q_mag[keep])) if keep.any() else np.nan,
+                "median_|q|_field": float(np.median(q_mag)),
+                "max_|q|_field": float(np.max(q_mag)),
+            }
+        )
+
+    df = pd.DataFrame(rows)
+    if mode == "absolute":
+        hdr = f"=== q mask |q| thresholds (mask |q| <= {abs_threshold:g}) ==="
+    elif mode == "quantile":
+        hdr = f"=== q mask |q| thresholds (mask |q| <= p{skip_quantile_pct:g}) ==="
+    else:
+        hdr = "=== q mask: disabled ==="
+    if time_label:
+        hdr += f"  [{time_label}]"
+    print(hdr)
+    if df.empty:
+        print("(no models)")
+        return df
+    for _, r in df.iterrows():
+        if mode == "none":
+            print(f"  {r['model']}: masking disabled")
+            continue
+        print(
+            f"  {r['model']}: filter |q| <= {r['|q|_filter_threshold']:.6e}  "
+            f"({r['n_pixels_masked']} px, {100 * r['frac_masked']:.1f}% of grid)  "
+            f"| masked max={r['max_|q|_among_masked']:.6e}, kept min={r['min_|q|_among_kept']:.6e}, "
+            f"field median={r['median_|q|_field']:.6e}, max={r['max_|q|_field']:.6e}"
+        )
+    return df
+
+
+def apply_q_magnitude_mask(
+    qx: np.ndarray,
+    qy: np.ndarray,
+    *,
+    mode: str = "none",
+    skip_quantile_pct: float = 0.0,
+    abs_threshold: float | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, float | None, str]:
+    """Zero-out masked vectors (NaN) for quiver; return skip_mask and effective threshold."""
+    q_mag, skip, thr, mode = _q_mag_and_mask(
+        qx,
+        qy,
+        mode=mode,
+        skip_quantile_pct=skip_quantile_pct,
+        abs_threshold=abs_threshold,
+    )
+    if mode == "none":
+        return qx, qy, skip, None, mode
     qx_out = np.asarray(qx, dtype=float).copy()
     qy_out = np.asarray(qy, dtype=float).copy()
     qx_out[skip] = np.nan
     qy_out[skip] = np.nan
-    return qx_out, qy_out, skip, thr
+    return qx_out, qy_out, skip, thr, mode
 
 
 def _plot_q_mask_skip_dots(ax, field_map: xr.Dataset, skip_mask: np.ndarray, pick_stride: int):
@@ -534,7 +654,9 @@ def show_q_snapshots(
     display_magnitude_gamma: float = 0.45,
     display_min_arrow_frac: float = 0.15,
     display_max_arrow_frac: float = 1.0,
+    q_mask_mode: str = "none",
     q_mask_skip_quantile_pct: float = 0.0,
+    q_mask_abs_threshold: float | None = None,
     q_deep_zoom_x: tuple[float, float] | None = None,
     q_deep_zoom_y: tuple[float, float] | None = None,
     q_deep_zoom_stride: int | None = None,
@@ -552,9 +674,14 @@ def show_q_snapshots(
     min/max arrow floors so weak and extreme vectors remain visible.
     Set ``display_magnitude_gamma=1`` for linear lens; manual ``*_display_boost`` overrides lens.
 
-    ``q_mask_skip_quantile_pct`` (e.g. ``50``): per model / time slice, hide the bottom
-    that fraction of |q| (arrows omitted); skipped grid points are drawn as purple dots.
-    ``0`` disables masking.
+    **q masking** (purple dots = masked, no arrow):
+
+    - ``q_mask_mode='quantile'`` + ``q_mask_skip_quantile_pct`` (e.g. ``50``): mask |q| at or
+      below the per-slice percentile.
+    - ``q_mask_mode='absolute'`` + ``q_mask_abs_threshold`` (e.g. ``1e-9``): mask all pixels with
+      |q| <= that value.
+    - ``q_mask_mode='none'``: no mask. Legacy: ``q_mask_skip_quantile_pct > 0`` alone still
+      enables quantile mode.
     """
     spat_dist_df = spat_dist_df[spat_dist_df["variable"] == variable].copy()
     if spat_dist_df.empty:
@@ -596,10 +723,18 @@ def show_q_snapshots(
         )
     else:
         arrow_note = "Arrows: display lens OFF — raw qx/qy (true relative magnitudes; may hide weak vectors)"
-    if q_mask_skip_quantile_pct > 0:
+    q_mask_mode_resolved = _normalize_q_mask_mode(
+        q_mask_mode,
+        skip_quantile_pct=q_mask_skip_quantile_pct,
+        abs_threshold=q_mask_abs_threshold,
+    )
+    if q_mask_mode_resolved == "quantile":
         arrow_note += (
-            f" | q mask: skip bottom {q_mask_skip_quantile_pct:g}% |q| per slice "
-            "(purple dots = masked)"
+            f" | q mask: |q| <= p{q_mask_skip_quantile_pct:g} per slice (purple dots = masked)"
+        )
+    elif q_mask_mode_resolved == "absolute":
+        arrow_note += (
+            f" | q mask: |q| <= {q_mask_abs_threshold:g} (purple dots = masked)"
         )
     fig.text(0.5, 0.005, arrow_note, ha="center", fontsize=10, style="italic")
 
@@ -626,16 +761,13 @@ def show_q_snapshots(
                 f"(γ={display_magnitude_gamma:g}, min_frac={display_min_arrow_frac:g}); "
                 "they are not proportional to physical |q|. Set use_quiver_lens=False to verify."
             )
-        qx_plot, qy_plot, q_skip_mask, q_skip_thr = _q_mask_skip_from_quantile(
-            flux["qx"], flux["qy"], q_mask_skip_quantile_pct
+        qx_plot, qy_plot, q_skip_mask, _q_skip_thr, _q_mask_mode_used = apply_q_magnitude_mask(
+            flux["qx"],
+            flux["qy"],
+            mode=q_mask_mode,
+            skip_quantile_pct=q_mask_skip_quantile_pct,
+            abs_threshold=q_mask_abs_threshold,
         )
-        if q_mask_skip_quantile_pct > 0:
-            n_skip = int(np.sum(q_skip_mask))
-            print(
-                f"[{sim}] q mask: skip bottom {q_mask_skip_quantile_pct:g}% |q| "
-                f"(|q| <= {q_skip_thr:.3e}) -> {n_skip}/{q_skip_mask.size} pixels "
-                f"({100.0 * n_skip / q_skip_mask.size:.1f}%)"
-            )
         qx_d, qy_d, q_tag, q_key = _vectors_for_quiver_display(
             qx_plot, qy_plot, q_boost, **disp_kw
         )
@@ -693,7 +825,7 @@ def show_q_snapshots(
                     quiver_label=f"q {q_tag}",
                     x_lim=x_lim,
                     y_lim=y_lim,
-                    q_skip_mask=q_skip_mask if q_mask_skip_quantile_pct > 0 else None,
+                    q_skip_mask=q_skip_mask if _q_mask_mode_used != "none" else None,
                 )
             elif kind == "grad":
                 im_mag = _plot_jet_T_quiver_panel(

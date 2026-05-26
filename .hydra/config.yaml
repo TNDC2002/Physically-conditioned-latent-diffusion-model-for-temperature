@@ -37,7 +37,7 @@ data:
     high_res:
     - 2mT
   batch_size: 25
-  num_workers: 12
+  num_workers: 6
   pin_memory: true
   crop_size: 512
   nn_lowres: false
@@ -141,10 +141,12 @@ model:
   anisotropic_transport_coef: 1.0e-10
   at_lambda_mag: 0.001
   at_lambda_dir: 1.0
-  at_loss_eps: 1.0e-12
+  at_loss_eps: 1.0e-20
   at_direction_loss: unit_mse
   at_dx: 2000.0
   at_dy: -2000.0
+  at_qmag_quantile: null
+  at_qmag_min: 1.0e-10
   ae_load_state_file: ${paths.pretrained_models_dir}VAE_residual_2mT.ckpt
   trainable_parts:
   - mf_unet.middle_block
@@ -223,6 +225,8 @@ trainer:
   strategy: ddp_find_unused_parameters_true
   check_val_every_n_epoch: 1
   deterministic: false
+  gradient_clip_val: 1.0
+  gradient_clip_algorithm: norm
 paths:
   root_dir: ${oc.env:PROJECT_ROOT}
   data_dir: ${paths.root_dir}/LDM-downscaling/full_Dataset/

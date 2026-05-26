@@ -41,6 +41,8 @@ class LatentMeanFlowLitModule(LightningModule):
         at_direction_loss: str = "cosine",
         at_dx: float = 2000.0,
         at_dy: float = -2000.0,
+        at_qmag_quantile: Optional[float] = None,
+        at_qmag_min: Optional[float] = None,
         use_meanflow_paper_core: bool = False,
         meanflow_paper: Optional[Dict[str, Any]] = None,
         control_metric_weights: Optional[Dict[str, float]] = None,
@@ -63,6 +65,10 @@ class LatentMeanFlowLitModule(LightningModule):
         self.at_direction_loss = str(at_direction_loss)
         self.at_dx = float(at_dx)
         self.at_dy = float(at_dy)
+        self.at_qmag_quantile = (
+            None if at_qmag_quantile is None else float(at_qmag_quantile)
+        )
+        self.at_qmag_min = None if at_qmag_min is None else float(at_qmag_min)
         self.use_meanflow_paper_core = bool(use_meanflow_paper_core)
         self.control_metric_weights = {
             "loss": 0.0,
@@ -205,12 +211,16 @@ class LatentMeanFlowLitModule(LightningModule):
                     lambda_mag=self.at_lambda_mag,
                     lambda_dir=self.at_lambda_dir,
                     direction_kind=self.at_direction_loss,
+                    qmag_quantile=self.at_qmag_quantile,
+                    qmag_min=self.at_qmag_min,
                 )
                 addon = addon + self.anisotropic_transport_coef * at["L_total"]
                 pure_metrics["at_mag_pure"] = at["L_mag"].detach()
                 pure_metrics["at_dir_pure"] = at["L_dir"].detach()
                 pure_metrics["at_dir_pure_cosine"] = at["L_dir_cosine"].detach()
                 pure_metrics["at_dir_pure_unit_mse"] = at["L_dir_unit_mse"].detach()
+                if "at_mask_frac" in at:
+                    pure_metrics["at_mask_frac"] = at["at_mask_frac"].detach()
         return addon, pure_metrics
 
     @staticmethod
@@ -289,6 +299,7 @@ class LatentMeanFlowLitModule(LightningModule):
             metrics["at_dir_pure"] = pure_phys.get("at_dir_pure", z_phys)
             metrics["at_dir_pure_cosine"] = pure_phys.get("at_dir_pure_cosine", z_phys)
             metrics["at_dir_pure_unit_mse"] = pure_phys.get("at_dir_pure_unit_mse", z_phys)
+            metrics["at_mask_frac"] = pure_phys.get("at_mask_frac", z_phys)
 
         return total_loss, metrics
 
@@ -322,6 +333,8 @@ class LatentMeanFlowLitModule(LightningModule):
         self.log("val/r2", metrics["r2"], **log_params, sync_dist=True)
         self.log("val/temp_pde_pure", metrics["temp_pde_pure"], **log_params, sync_dist=True)
         self.log("val/at_mag_pure", metrics["at_mag_pure"], **log_params, sync_dist=True)
+        if self.at_qmag_quantile is not None or self.at_qmag_min is not None:
+            self.log("val/at_mask_frac", metrics["at_mask_frac"], **log_params, sync_dist=True)
         self.log("val/at_dir_pure_cosine", metrics["at_dir_pure_cosine"], **log_params, sync_dist=True)
         self.log(
             "val/at_dir_pure_cosine_log",

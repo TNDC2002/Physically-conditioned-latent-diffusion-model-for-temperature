@@ -166,6 +166,49 @@ class TemperatureFieldLosses:
         qy = -(J_xy * dTdx + J_yy * dTdy)
         return qx, qy
 
+    @staticmethod
+    def _masked_mean(x: torch.Tensor, mask: torch.Tensor | None) -> torch.Tensor:
+        if mask is None:
+            return x.mean()
+        m = mask.to(dtype=x.dtype)
+        denom = m.sum().clamp(min=1.0)
+        return (x * m).sum() / denom
+
+    def _build_anisotropic_qmag_mask(
+        self,
+        mag_gt: torch.Tensor,
+        *,
+        qmag_quantile: float | None = None,
+        qmag_min: float | None = None,
+    ) -> torch.Tensor | None:
+        """Build GT-only mask for anisotropic loss (modes combine with AND).
+
+        - ``qmag_quantile``: keep pixels with ``|q_gt|`` at/above per-sample quantile.
+        - ``qmag_min``: keep pixels with ``|q_gt| > qmag_min`` (drop ``|q_gt| <= qmag_min``).
+
+        Mask uses ground truth only: low ``|q_pred|`` on meaningful ``|q_gt|`` still counts.
+        """
+        mask: torch.Tensor | None = None
+
+        if qmag_quantile is not None:
+            q = float(qmag_quantile)
+            if q <= 0.0 or q >= 1.0:
+                raise ValueError(f"qmag_quantile must be in (0, 1), got {qmag_quantile!r}")
+            flat = mag_gt.reshape(mag_gt.shape[0], -1)
+            thr = torch.quantile(flat, q, dim=1, keepdim=True)
+            thr = thr.view(mag_gt.shape[0], *([1] * (mag_gt.ndim - 1)))
+            q_mask = mag_gt >= thr
+            mask = q_mask if mask is None else mask & q_mask
+
+        if qmag_min is not None:
+            m = float(qmag_min)
+            if m < 0.0:
+                raise ValueError(f"qmag_min must be >= 0, got {qmag_min!r}")
+            min_mask = mag_gt > m
+            mask = min_mask if mask is None else mask & min_mask
+
+        return mask
+
     def anisotropic_transport_loss(
         self,
         T_pred: torch.Tensor,
@@ -177,11 +220,17 @@ class TemperatureFieldLosses:
         lambda_mag: float = 1.0,
         lambda_dir: float = 1.0,
         direction_kind: str = "cosine",
+        qmag_quantile: float | None = None,
+        qmag_min: float | None = None,
     ) -> dict[str, torch.Tensor]:
         """Anisotropic Transport Loss: L = lambda_mag * L_mag + lambda_dir * L_dir.
 
         - L_mag = MSE(log(|q_pred|+eps), log(|q_gt|+eps))
         - L_dir = mean(1 - cos(q_pred, q_gt)) or unit-vector MSE on q_hat
+
+        GT masking (optional, combined with AND):
+        - ``qmag_quantile`` (e.g. 0.5): per-sample quantile on ``|q_gt|``.
+        - ``qmag_min`` (e.g. 1e-12): drop pixels with ``|q_gt| <= qmag_min``.
 
         ``T_pred``: reconstructed residual R (decoded one-step latent), normalized.
         ``T_gt``: normalized COSMO-CLM high-res target (batch ``y``).
@@ -190,14 +239,21 @@ class TemperatureFieldLosses:
         qx_g, qy_g = self._anisotropic_flux_q(T_gt, dx=dx, dy=dy)
         mag_p = torch.hypot(qx_p, qy_p)
         mag_g = torch.hypot(qx_g, qy_g)
-        l_mag = F.mse_loss(torch.log(mag_p + eps), torch.log(mag_g + eps))
+        mask = self._build_anisotropic_qmag_mask(
+            mag_g, qmag_quantile=qmag_quantile, qmag_min=qmag_min
+        )
+
+        l_mag = self._masked_mean(
+            (torch.log(mag_p + eps) - torch.log(mag_g + eps)) ** 2, mask
+        )
 
         dot = qx_p * qx_g + qy_p * qy_g
         cos = dot / (mag_p * mag_g + eps)
-        l_dir_cosine = (1.0 - cos).mean()
+        l_dir_cosine = self._masked_mean(1.0 - cos, mask)
         px, py = qx_p / (mag_p + eps), qy_p / (mag_p + eps)
         gx, gy = qx_g / (mag_g + eps), qy_g / (mag_g + eps)
-        l_dir_unit_mse = F.mse_loss(px, gx) + F.mse_loss(py, gy)
+        unit_sq = (px - gx) ** 2 + (py - gy) ** 2
+        l_dir_unit_mse = self._masked_mean(unit_sq, mask)
 
         if direction_kind == "cosine":
             l_dir = l_dir_cosine
@@ -209,10 +265,13 @@ class TemperatureFieldLosses:
             )
 
         l_total = lambda_mag * l_mag + lambda_dir * l_dir
-        return {
+        out: dict[str, torch.Tensor] = {
             "L_mag": l_mag,
             "L_dir": l_dir,
             "L_dir_cosine": l_dir_cosine,
             "L_dir_unit_mse": l_dir_unit_mse,
             "L_total": l_total,
         }
+        if mask is not None:
+            out["at_mask_frac"] = mask.float().mean()
+        return out

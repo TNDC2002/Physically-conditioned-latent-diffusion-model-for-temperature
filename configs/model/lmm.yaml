@@ -102,5 +102,10 @@ at_loss_eps: 1.0e-12
 at_direction_loss: cosine
 at_dx: 2000.0
 at_dy: -2000.0
+# GT |q| mask modes (combine with AND if both set; mask never uses |q_pred|):
+# quantile: keep pixels with |q_gt| >= per-sample quantile; null = off; 0.5 = skip bottom 50%.
+at_qmag_quantile: null
+# absolute: keep pixels with |q_gt| > at_qmag_min; null = off; 1.0e-12 drops near-zero flux.
+at_qmag_min: null
 
 ae_load_state_file: null

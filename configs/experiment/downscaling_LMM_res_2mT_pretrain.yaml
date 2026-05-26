@@ -39,6 +39,8 @@ trainer:
   max_epochs: 100
   devices: 2
   strategy: ddp_find_unused_parameters_true
+  gradient_clip_val: 1.0
+  gradient_clip_algorithm: norm
 
 
 data:
@@ -76,10 +78,13 @@ model:
   # at_lambda_dir: 1.0e+9 # for cosine loss
   at_lambda_mag: 1.0e-3 # for unit_mse loss
   at_lambda_dir: 1.0 # for unit_mse loss
-  at_loss_eps: 1.0e-12
+  at_loss_eps: 1.0e-20
   at_direction_loss: unit_mse # cosine or unit_mse
   at_dx: 2000.0
   at_dy: -2000.0
+  # GT |q| masks (AND if both set): quantile and/or absolute floor on |q_gt|.
+  # at_qmag_quantile: 0.5
+  at_qmag_min: 1.0e-10   # alternative/complement: drop |q_gt| <= 1e-10
   autoencoder:
     unet_regr:
       ckpt_path: ${paths.pretrained_models_dir}UNET_2mT.ckpt
