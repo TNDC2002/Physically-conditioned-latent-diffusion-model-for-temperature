@@ -138,7 +138,7 @@ model:
   pde_mode: temp
   temp_pde_coef: 0.0
   temp_pde_num_supercells: 8
-  anisotropic_transport_coef: 1.0e-10
+  anisotropic_transport_coef: 1.0e-12
   at_lambda_mag: 0.001
   at_lambda_dir: 1.0
   at_loss_eps: 1.0e-20

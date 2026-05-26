@@ -5,7 +5,7 @@
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 # LOG_DIR="${LOG_DIR:-$REPO_ROOT/slurm_logs}"
-LOG_DIR="${LOG_DIR:-$REPO_ROOT/LDM-downscaling/slurm_logs}"
+LOG_DIR="${LOG_DIR:-$REPO_ROOT/slurm_logs}"
 PARTITION="${PARTITION:-main}"
 NUM_GPUS="${NUM_GPUS:-2}"
 GPU_TYPE="${GPU_TYPE:-nvidia_h100_80gb_hbm3}"

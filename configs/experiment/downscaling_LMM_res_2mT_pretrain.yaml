@@ -61,6 +61,8 @@ model:
   control_metric_weights:
     loss: 0.0
     legacy_adaptive_l2: 0.0
+    # mf_loss_f64 / mf_minus_1 / loss_total_f64: logged in TensorBoard (f64); default 0 for control_score.
+    # Example when focusing on total loss: loss_total_f64: 1.0  or  mf_minus_1: 1.0e8
     rmse: 1.0
     r2: 0.0
     temp_pde_pure: 0.01
@@ -73,10 +75,10 @@ model:
   pde_mode: "temp"
   temp_pde_num_supercells: 8
   # Anisotropic Transport: R̂ vs normalized COSMO-CLM (not ERA5 T_c)
-  anisotropic_transport_coef: 1.0e-10
+  anisotropic_transport_coef: 1.0e-9
   # at_lambda_mag: 1.0e-6 # for cosine loss
   # at_lambda_dir: 1.0e+9 # for cosine loss
-  at_lambda_mag: 1.0e-3 # for unit_mse loss
+  at_lambda_mag: 0.1 # for unit_mse loss
   at_lambda_dir: 1.0 # for unit_mse loss
   at_loss_eps: 1.0e-20
   at_direction_loss: unit_mse # cosine or unit_mse

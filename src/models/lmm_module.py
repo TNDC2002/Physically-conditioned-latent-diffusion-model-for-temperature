@@ -73,6 +73,10 @@ class LatentMeanFlowLitModule(LightningModule):
         self.control_metric_weights = {
             "loss": 0.0,
             "legacy_adaptive_l2": 0.0,
+            # High-precision MeanFlow monitors (f64 loss on detached error); default off for control_score.
+            "mf_loss_f64": 0.0,
+            "mf_minus_1": 0.0,
+            "loss_total_f64": 0.0,
             "rmse": 1.0,
             "r2": 0.0,
             # Unscaled physics scalars (same forward as training coefs); not multiplied by coefs.
@@ -223,30 +227,15 @@ class LatentMeanFlowLitModule(LightningModule):
                     pure_metrics["at_mask_frac"] = at["at_mask_frac"].detach()
         return addon, pure_metrics
 
-    @staticmethod
-    def _log10_scalar(value: torch.Tensor, eps: float) -> torch.Tensor:
-        """log10(|value|) with floor ``eps``; keeps device/dtype of ``value``."""
-        out = torch.log10(value.detach().float().abs().clamp(min=eps))
-        return out.to(device=value.device, dtype=value.dtype)
-
-    @staticmethod
-    def _log10_direction_cosine_loss(value: torch.Tensor, eps: float) -> torch.Tensor:
-        """Display-friendly log for ``L_dir_cosine = mean(1 - cos)`` in ``[0, 2]``.
-
-        Plain ``log10(L)`` is flat when ``L ≈ 1`` (random alignment) because ``log10(1)=0``.
-        For small ``L``, use ``-log10(L)``; for ``L >= 0.5``, log distance from the random baseline ``1``.
-        """
-        v = value.detach().float().abs()
-        small_regime = v < 0.5
-        log_small = -torch.log10(v.clamp(min=eps))
-        log_large = torch.log10((v - 1.0).abs().clamp(min=eps))
-        out = torch.where(small_regime, log_small, log_large)
-        return out.to(device=value.device, dtype=value.dtype)
-
     @property
     def _uses_legacy_meanflow_loss(self) -> bool:
         """Old ``MeanFlowCore`` is the training loss (not the paper core)."""
         return not self.use_meanflow_paper_core
+
+    @staticmethod
+    def _mf_adaptive_l2_f64(core, error: torch.Tensor) -> torch.Tensor:
+        """MeanFlow adaptive loss in float64 (monitoring only; training stays float32)."""
+        return core.adaptive_l2_loss(error.detach().double())
 
     @staticmethod
     def _compute_rmse_r2(u_pred: torch.Tensor, u_tgt: torch.Tensor) -> Dict[str, torch.Tensor]:
@@ -290,6 +279,15 @@ class LatentMeanFlowLitModule(LightningModule):
 
         with torch.no_grad():
             metrics = self._compute_rmse_r2(u_pred, u_tgt)
+            mf_loss_f64 = self._mf_adaptive_l2_f64(self.meanflow_core, error)
+            mf_minus_1 = mf_loss_f64 - 1.0
+            phys_det = phys.detach()
+            metrics["mf_loss"] = mf_loss.detach()
+            metrics["mf_loss_f64"] = mf_loss_f64
+            metrics["mf_minus_1"] = mf_minus_1
+            metrics["mf_minus_1_x1e8"] = mf_minus_1 * 1.0e8
+            metrics["phys_loss"] = phys_det
+            metrics["loss_total_f64"] = mf_loss_f64 + phys_det.double()
             if self._uses_legacy_meanflow_loss:
                 metrics["legacy_adaptive_l2"] = mf_loss.detach()
             # Same pattern as rmse/r2: always defined so callers use metrics["..."] directly.
@@ -303,81 +301,129 @@ class LatentMeanFlowLitModule(LightningModule):
 
         return total_loss, metrics
 
+    def _compute_control_score(
+        self,
+        loss: torch.Tensor,
+        metrics: Dict[str, torch.Tensor],
+    ) -> torch.Tensor:
+        """Composite validation monitor (lower is better). Enable ``mf_minus_1`` / ``loss_total_f64`` via config."""
+        w = self.control_metric_weights
+        score = (
+            w["loss"] * loss
+            + w["rmse"] * metrics["rmse"]
+            - w["r2"] * metrics["r2"]
+            + w["temp_pde_pure"] * metrics["temp_pde_pure"]
+            + w["at_mag_pure"] * metrics["at_mag_pure"]
+            + w["at_dir_pure"] * metrics["at_dir_pure"]
+            + w.get("mf_loss_f64", 0.0) * metrics["mf_loss_f64"]
+            + w.get("mf_minus_1", 0.0) * metrics["mf_minus_1"]
+            + w.get("loss_total_f64", 0.0) * metrics["loss_total_f64"]
+        )
+        legacy_l2 = metrics.get("legacy_adaptive_l2")
+        if legacy_l2 is not None:
+            score = score + w["legacy_adaptive_l2"] * legacy_l2
+        return score
+
+    def _log_mf_monitors(
+        self,
+        prefix: str,
+        metrics: Dict[str, torch.Tensor],
+        *,
+        prog_bar: bool = False,
+    ) -> None:
+        """TensorBoard-friendly MeanFlow monitors (f64); progress bar uses ``mf_minus_1_x1e8``."""
+        log_params = {"on_step": False, "on_epoch": True, "sync_dist": True}
+        self.log(f"{prefix}/mf_loss", metrics["mf_loss"], **log_params)
+        self.log(f"{prefix}/mf_loss_f64", metrics["mf_loss_f64"], **log_params)
+        self.log(f"{prefix}/mf_minus_1", metrics["mf_minus_1"], **log_params)
+        self.log(
+            f"{prefix}/mf_minus_1_x1e8",
+            metrics["mf_minus_1_x1e8"],
+            **log_params,
+            prog_bar=prog_bar,
+        )
+        self.log(f"{prefix}/phys_loss", metrics["phys_loss"], **log_params)
+        self.log(f"{prefix}/loss_total_f64", metrics["loss_total_f64"], **log_params)
+
     def shared_step(self, batch, create_graph: bool):
         latent_target, context_dict = self.build_latent_and_context(batch)
         return self._meanflow_train_loss(latent_target, context_dict, create_graph=create_graph)
 
     def training_step(self, batch, batch_idx):
         loss, metrics = self.shared_step(batch, create_graph=True)
-        self.log("train/loss", loss, on_step=False, on_epoch=True, sync_dist=True)
-        self.log("train/rmse", metrics["rmse"], on_step=False, on_epoch=True, sync_dist=True)
-        self.log("train/r2", metrics["r2"], on_step=False, on_epoch=True, sync_dist=True)
-        if "legacy_adaptive_l2" in metrics:
-            self.log(
-                "train/legacy_adaptive_l2",
-                metrics["legacy_adaptive_l2"],
-                on_step=False,
-                on_epoch=True,
-                sync_dist=True,
-            )
+        log_params = {"on_step": False, "on_epoch": True, "sync_dist": True}
+        self.log("train/loss", loss, **log_params)
+        self.log("train/rmse", metrics["rmse"], **log_params)
+        self.log("train/r2", metrics["r2"], **log_params)
+        self._log_mf_monitors("train", metrics)
         return loss
 
     def validation_step(self, batch, batch_idx):
         loss, metrics = self.shared_step(batch, create_graph=False)
         with self.ema_scope():
             loss_ema, metrics_ema = self.shared_step(batch, create_graph=False)
-        log_params = {"on_step": False, "on_epoch": True, "prog_bar": True}
-        self.log("val/loss", self._log10_scalar(loss, self.at_loss_eps), **log_params, sync_dist=True)
-        self.log("val/loss_ema", self._log10_scalar(loss_ema, self.at_loss_eps), **log_params, sync_dist=True)
-        self.log("val/rmse", metrics["rmse"], **log_params, sync_dist=True)
-        self.log("val/r2", metrics["r2"], **log_params, sync_dist=True)
-        self.log("val/temp_pde_pure", metrics["temp_pde_pure"], **log_params, sync_dist=True)
-        self.log("val/at_mag_pure", metrics["at_mag_pure"], **log_params, sync_dist=True)
-        if self.at_qmag_quantile is not None or self.at_qmag_min is not None:
-            self.log("val/at_mask_frac", metrics["at_mask_frac"], **log_params, sync_dist=True)
-        self.log("val/at_dir_pure_cosine", metrics["at_dir_pure_cosine"], **log_params, sync_dist=True)
+
+        log_params = {"on_step": False, "on_epoch": True, "prog_bar": False, "sync_dist": True}
+        self.log("val/rmse", metrics["rmse"], **log_params)
+        self.log("val/r2", metrics["r2"], **log_params)
+        self.log("val/at_mag_pure", metrics["at_mag_pure"], **log_params)
+        self.log("val/at_dir_pure_cosine", metrics["at_dir_pure_cosine"], **log_params)
+        self.log("val/at_dir_pure_unit_mse", metrics["at_dir_pure_unit_mse"], **log_params)
+        self.log("val/loss", loss, **log_params)
+        self._log_mf_monitors("val", metrics, prog_bar=True)
+        self._log_mf_monitors("val_ema", metrics_ema)
         self.log(
-            "val/at_dir_pure_cosine_log",
-            self._log10_direction_cosine_loss(metrics["at_dir_pure_cosine"], self.at_loss_eps),
-            **log_params,
+            "val/loss_total_ema",
+            loss_ema,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
             sync_dist=True,
         )
         self.log(
-            "val/at_dir_pure_unit_mse",
-            metrics["at_dir_pure_unit_mse"],
-            **log_params,
+            "val/loss_total_f64_ema",
+            metrics_ema["loss_total_f64"],
+            on_step=False,
+            on_epoch=True,
+            prog_bar=False,
             sync_dist=True,
         )
-        # Composite control monitor used by scheduler/early-stop/checkpoint selection.
-        # Lower is better; better r2 reduces score via the negative sign.
-        control_score = (
-            self.control_metric_weights["loss"] * loss
-            + self.control_metric_weights["rmse"] * metrics["rmse"]
-            - self.control_metric_weights["r2"] * metrics["r2"]
-            + self.control_metric_weights["temp_pde_pure"] * metrics["temp_pde_pure"]
-            + self.control_metric_weights["at_mag_pure"] * metrics["at_mag_pure"]
-            + self.control_metric_weights["at_dir_pure"] * metrics["at_dir_pure"]
+        control_score = self._compute_control_score(loss, metrics)
+        control_score_ema = self._compute_control_score(loss_ema, metrics_ema)
+        self.log(
+            "val/control_score",
+            control_score,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+            sync_dist=True,
         )
-        legacy_l2 = metrics.get("legacy_adaptive_l2")
-        if legacy_l2 is not None:
-            control_score = control_score + (
-                self.control_metric_weights["legacy_adaptive_l2"] * legacy_l2
-            )
-        self.log("val/control_score", control_score, **log_params, sync_dist=True)
+        self.log(
+            "val/control_score_ema",
+            control_score_ema,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=False,
+            sync_dist=True,
+        )
         if "legacy_adaptive_l2" in metrics:
-            self.log("val/legacy_adaptive_l2", metrics["legacy_adaptive_l2"], **log_params, sync_dist=True)
+            self.log("val/legacy_adaptive_l2", metrics["legacy_adaptive_l2"], **log_params)
 
     def test_step(self, batch, batch_idx):
         loss, metrics = self.shared_step(batch, create_graph=False)
         with self.ema_scope():
             loss_ema, metrics_ema = self.shared_step(batch, create_graph=False)
-        log_params = {"on_step": False, "on_epoch": True, "prog_bar": True}
-        self.log("test/loss", self._log10_scalar(loss, self.at_loss_eps), **log_params, sync_dist=True)
-        self.log("test/loss_ema", self._log10_scalar(loss_ema, self.at_loss_eps), **log_params, sync_dist=True)
-        self.log("test/rmse", metrics["rmse"], **log_params, sync_dist=True)
-        self.log("test/r2", metrics["r2"], **log_params, sync_dist=True)
+        log_params = {"on_step": False, "on_epoch": True, "prog_bar": True, "sync_dist": True}
+        self.log("test/rmse", metrics["rmse"], **log_params)
+        self.log("test/r2", metrics["r2"], **log_params)
+        self.log("test/at_mag_pure", metrics["at_mag_pure"], **log_params)
+        self.log("test/at_dir_pure_cosine", metrics["at_dir_pure_cosine"], **log_params)
+        self.log("test/at_dir_pure_unit_mse", metrics["at_dir_pure_unit_mse"], **log_params)
+        self.log("test/loss_total_ema", loss_ema, **log_params)
+        self._log_mf_monitors("test", metrics)
+        self._log_mf_monitors("test_ema", metrics_ema)
         if "legacy_adaptive_l2" in metrics:
-            self.log("test/legacy_adaptive_l2", metrics["legacy_adaptive_l2"], **log_params, sync_dist=True)
+            self.log("test/legacy_adaptive_l2", metrics["legacy_adaptive_l2"], **log_params)
 
     def on_train_batch_end(self, *args, **kwargs):
         if self.use_ema:
