@@ -129,17 +129,20 @@ model:
   control_metric_weights:
     loss: 0.0
     legacy_adaptive_l2: 0.0
-    rmse: 1.0
+    mf_loss_f64: 0.0
+    mf_minus_1: 100000000.0
+    loss_total_f64: 0.0
+    rmse: 0.0
     r2: 0.0
-    temp_pde_pure: 0.01
-    at_mag_pure: 0.1
-    at_dir_pure: 1.0
+    temp_pde_pure: 0.0
+    at_mag_pure: 0.01
+    at_dir_pure: 0.1
   pde_lambda: 0.0
   pde_mode: temp
   temp_pde_coef: 0.0
   temp_pde_num_supercells: 8
-  anisotropic_transport_coef: 1.0e-12
-  at_lambda_mag: 0.001
+  anisotropic_transport_coef: 1.0e-09
+  at_lambda_mag: 0.1
   at_lambda_dir: 1.0
   at_loss_eps: 1.0e-20
   at_direction_loss: unit_mse

@@ -70,16 +70,15 @@ class LatentMeanFlowLitModule(LightningModule):
         )
         self.at_qmag_min = None if at_qmag_min is None else float(at_qmag_min)
         self.use_meanflow_paper_core = bool(use_meanflow_paper_core)
+        # All 0.0 by default. Non-zero control_metric_weights only in configs/experiment/*.yaml.
         self.control_metric_weights = {
             "loss": 0.0,
             "legacy_adaptive_l2": 0.0,
-            # High-precision MeanFlow monitors (f64 loss on detached error); default off for control_score.
             "mf_loss_f64": 0.0,
             "mf_minus_1": 0.0,
             "loss_total_f64": 0.0,
-            "rmse": 1.0,
+            "rmse": 0.0,
             "r2": 0.0,
-            # Unscaled physics scalars (same forward as training coefs); not multiplied by coefs.
             "temp_pde_pure": 0.0,
             "at_mag_pure": 0.0,
             "at_dir_pure": 0.0,
@@ -309,19 +308,19 @@ class LatentMeanFlowLitModule(LightningModule):
         """Composite validation monitor (lower is better). Enable ``mf_minus_1`` / ``loss_total_f64`` via config."""
         w = self.control_metric_weights
         score = (
-            w["loss"] * loss
-            + w["rmse"] * metrics["rmse"]
-            - w["r2"] * metrics["r2"]
-            + w["temp_pde_pure"] * metrics["temp_pde_pure"]
-            + w["at_mag_pure"] * metrics["at_mag_pure"]
-            + w["at_dir_pure"] * metrics["at_dir_pure"]
+            w.get("loss", 0.0) * loss
+            + w.get("rmse", 0.0) * metrics["rmse"]
+            - w.get("r2", 0.0) * metrics["r2"]
+            + w.get("temp_pde_pure", 0.0) * metrics["temp_pde_pure"]
+            + w.get("at_mag_pure", 0.0) * metrics["at_mag_pure"]
+            + w.get("at_dir_pure", 0.0) * metrics["at_dir_pure"]
             + w.get("mf_loss_f64", 0.0) * metrics["mf_loss_f64"]
             + w.get("mf_minus_1", 0.0) * metrics["mf_minus_1"]
             + w.get("loss_total_f64", 0.0) * metrics["loss_total_f64"]
         )
         legacy_l2 = metrics.get("legacy_adaptive_l2")
         if legacy_l2 is not None:
-            score = score + w["legacy_adaptive_l2"] * legacy_l2
+            score = score + w.get("legacy_adaptive_l2", 0.0) * legacy_l2
         return score
 
     def _log_mf_monitors(

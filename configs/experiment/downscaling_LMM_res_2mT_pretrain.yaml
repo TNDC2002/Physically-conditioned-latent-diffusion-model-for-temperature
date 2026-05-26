@@ -58,16 +58,11 @@ model:
     - "mf_unet.out"
 
 
+  # Only non-zero keys affect val/control_score (defaults in lmm_module + lmm.yaml are 0).
   control_metric_weights:
-    loss: 0.0
-    legacy_adaptive_l2: 0.0
-    # mf_loss_f64 / mf_minus_1 / loss_total_f64: logged in TensorBoard (f64); default 0 for control_score.
-    # Example when focusing on total loss: loss_total_f64: 1.0  or  mf_minus_1: 1.0e8
-    rmse: 1.0
-    r2: 0.0
-    temp_pde_pure: 0.01
-    at_mag_pure: 0.1
-    at_dir_pure: 1.0
+    mf_minus_1: 1.0e8
+    at_mag_pure: 0.01
+    at_dir_pure: 0.1
 
   use_ema: true
   pde_lambda: 0.0

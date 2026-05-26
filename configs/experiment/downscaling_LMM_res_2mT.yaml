@@ -61,9 +61,8 @@ model:
   at_direction_loss: cosine # cosine or unit_mse
   at_dx: 2000.0
   at_dy: -2000.0
+  # Non-pretrain profile: RMSE + AT (zeros omitted; see configs/CONTROL_METRIC_WEIGHTS.md).
   control_metric_weights:
-    loss: 0.0
-    legacy_adaptive_l2: 0.0
     rmse: 1.0
     temp_pde_pure: 0.01
     at_mag_pure: 1.0

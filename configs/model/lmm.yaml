@@ -76,15 +76,16 @@ lr: 1e-4
 lr_warmup: 0
 use_ema: true
 loss_type: l2
-# Composite control-score weights (shared by scheduler/early-stop/checkpoint):
-# val/loss, val/rmse, (-val/r2), unscaled physics scalars; legacy_adaptive_l2 only when
-# use_meanflow_paper_core=false (old MeanFlowCore is the training loss).
+# val/control_score: all 0 here. Non-zero weights ONLY in configs/experiment/*.yaml (see CONTROL_METRIC_WEIGHTS.md).
 control_metric_weights:
-  loss: 1.0
+  loss: 0.0
   legacy_adaptive_l2: 0.0
-  rmse: 1.0
-  r2: 1.0
-  temp_pde_pure: 1.0
+  mf_loss_f64: 0.0
+  mf_minus_1: 0.0
+  loss_total_f64: 0.0
+  rmse: 0.0
+  r2: 0.0
+  temp_pde_pure: 0.0
   at_mag_pure: 0.0
   at_dir_pure: 0.0
 
