@@ -330,10 +330,8 @@ class LatentMeanFlowLitModule(LightningModule):
         *,
         prog_bar: bool = False,
     ) -> None:
-        """TensorBoard-friendly MeanFlow monitors (f64); progress bar uses ``mf_minus_1_x1e8``."""
+        """MeanFlow deviation + physics only (skip flat ~1.0 scalars and EMA duplicates)."""
         log_params = {"on_step": False, "on_epoch": True, "sync_dist": True}
-        self.log(f"{prefix}/mf_loss", metrics["mf_loss"], **log_params)
-        self.log(f"{prefix}/mf_loss_f64", metrics["mf_loss_f64"], **log_params)
         self.log(f"{prefix}/mf_minus_1", metrics["mf_minus_1"], **log_params)
         self.log(
             f"{prefix}/mf_minus_1_x1e8",
@@ -342,7 +340,6 @@ class LatentMeanFlowLitModule(LightningModule):
             prog_bar=prog_bar,
         )
         self.log(f"{prefix}/phys_loss", metrics["phys_loss"], **log_params)
-        self.log(f"{prefix}/loss_total_f64", metrics["loss_total_f64"], **log_params)
 
     def shared_step(self, batch, create_graph: bool):
         latent_target, context_dict = self.build_latent_and_context(batch)
@@ -351,7 +348,6 @@ class LatentMeanFlowLitModule(LightningModule):
     def training_step(self, batch, batch_idx):
         loss, metrics = self.shared_step(batch, create_graph=True)
         log_params = {"on_step": False, "on_epoch": True, "sync_dist": True}
-        self.log("train/loss", loss, **log_params)
         self.log("train/rmse", metrics["rmse"], **log_params)
         self.log("train/r2", metrics["r2"], **log_params)
         self._log_mf_monitors("train", metrics)
@@ -359,8 +355,6 @@ class LatentMeanFlowLitModule(LightningModule):
 
     def validation_step(self, batch, batch_idx):
         loss, metrics = self.shared_step(batch, create_graph=False)
-        with self.ema_scope():
-            loss_ema, metrics_ema = self.shared_step(batch, create_graph=False)
 
         log_params = {"on_step": False, "on_epoch": True, "prog_bar": False, "sync_dist": True}
         self.log("val/rmse", metrics["rmse"], **log_params)
@@ -368,27 +362,8 @@ class LatentMeanFlowLitModule(LightningModule):
         self.log("val/at_mag_pure", metrics["at_mag_pure"], **log_params)
         self.log("val/at_dir_pure_cosine", metrics["at_dir_pure_cosine"], **log_params)
         self.log("val/at_dir_pure_unit_mse", metrics["at_dir_pure_unit_mse"], **log_params)
-        self.log("val/loss", loss, **log_params)
         self._log_mf_monitors("val", metrics, prog_bar=True)
-        self._log_mf_monitors("val_ema", metrics_ema)
-        self.log(
-            "val/loss_total_ema",
-            loss_ema,
-            on_step=False,
-            on_epoch=True,
-            prog_bar=True,
-            sync_dist=True,
-        )
-        self.log(
-            "val/loss_total_f64_ema",
-            metrics_ema["loss_total_f64"],
-            on_step=False,
-            on_epoch=True,
-            prog_bar=False,
-            sync_dist=True,
-        )
         control_score = self._compute_control_score(loss, metrics)
-        control_score_ema = self._compute_control_score(loss_ema, metrics_ema)
         self.log(
             "val/control_score",
             control_score,
@@ -397,32 +372,16 @@ class LatentMeanFlowLitModule(LightningModule):
             prog_bar=True,
             sync_dist=True,
         )
-        self.log(
-            "val/control_score_ema",
-            control_score_ema,
-            on_step=False,
-            on_epoch=True,
-            prog_bar=False,
-            sync_dist=True,
-        )
-        if "legacy_adaptive_l2" in metrics:
-            self.log("val/legacy_adaptive_l2", metrics["legacy_adaptive_l2"], **log_params)
 
     def test_step(self, batch, batch_idx):
-        loss, metrics = self.shared_step(batch, create_graph=False)
-        with self.ema_scope():
-            loss_ema, metrics_ema = self.shared_step(batch, create_graph=False)
+        _, metrics = self.shared_step(batch, create_graph=False)
         log_params = {"on_step": False, "on_epoch": True, "prog_bar": True, "sync_dist": True}
         self.log("test/rmse", metrics["rmse"], **log_params)
         self.log("test/r2", metrics["r2"], **log_params)
         self.log("test/at_mag_pure", metrics["at_mag_pure"], **log_params)
         self.log("test/at_dir_pure_cosine", metrics["at_dir_pure_cosine"], **log_params)
         self.log("test/at_dir_pure_unit_mse", metrics["at_dir_pure_unit_mse"], **log_params)
-        self.log("test/loss_total_ema", loss_ema, **log_params)
         self._log_mf_monitors("test", metrics)
-        self._log_mf_monitors("test_ema", metrics_ema)
-        if "legacy_adaptive_l2" in metrics:
-            self.log("test/legacy_adaptive_l2", metrics["legacy_adaptive_l2"], **log_params)
 
     def on_train_batch_end(self, *args, **kwargs):
         if self.use_ema:

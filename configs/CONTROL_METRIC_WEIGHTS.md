@@ -23,9 +23,9 @@ No `control_metric_weights` block (inherits all 0 until you add one):
 - `downscaling_LMM_res_2mT_MIG.yaml`
 - `downscaling_LMM_res_2mT_smoke.yaml`
 
-## MeanFlow monitoring
+## MeanFlow monitoring (TensorBoard)
 
-Use `mf_minus_1` in **experiment** YAML for checkpoint/LR control (not `loss` / `mf_loss_f64` near 1.0). TensorBoard still logs `val/mf_loss_f64`, `val/mf_minus_1`, etc. from code.
+Logged: `val/mf_minus_1`, `val/mf_minus_1_x1e8`, `val/phys_loss` (not flat `mf_loss` / `loss_total_*` or EMA duplicates).
 
 ## Verify before a long run
 
