@@ -9,6 +9,9 @@ from __future__ import annotations
 import torch
 import torch.nn.functional as F
 
+# Fixed floor for log(|q|) in L_mag only (fp32-safe; not tied to directional eps).
+_AT_MAG_EPS = 1e-12
+
 
 class TemperatureFieldLosses:
     """Stateless helpers; no registered parameters."""
@@ -218,15 +221,17 @@ class TemperatureFieldLosses:
         dy: float = -2000.0,
         eps: float = 1e-12,
         lambda_mag: float = 1.0,
-        lambda_dir: float = 1.0,
-        direction_kind: str = "cosine",
+        lambda_dir_cosine: float = 0.0,
+        lambda_dir_unit_mse: float = 0.0,
         qmag_quantile: float | None = None,
         qmag_min: float | None = None,
     ) -> dict[str, torch.Tensor]:
-        """Anisotropic Transport Loss: L = lambda_mag * L_mag + lambda_dir * L_dir.
+        """Anisotropic Transport Loss with weighted directional components.
 
-        - L_mag = MSE(log(|q_pred|+eps), log(|q_gt|+eps))
-        - L_dir = mean(1 - cos(q_pred, q_gt)) or unit-vector MSE on q_hat
+        - L_mag = MSE(log(|q_pred|+eps_mag), log(|q_gt|+eps_mag)) with fixed ``_AT_MAG_EPS``
+        - L_dir_cosine / L_dir_unit_mse use ``eps`` (directional stabilization only)
+        - L_dir = lambda_dir_cosine * L_dir_cosine + lambda_dir_unit_mse * L_dir_unit_mse
+        - L_total = lambda_mag * L_mag + L_dir
 
         GT masking (optional, combined with AND):
         - ``qmag_quantile`` (e.g. 0.5): per-sample quantile on ``|q_gt|``.
@@ -243,8 +248,9 @@ class TemperatureFieldLosses:
             mag_g, qmag_quantile=qmag_quantile, qmag_min=qmag_min
         )
 
+        eps_mag = _AT_MAG_EPS
         l_mag = self._masked_mean(
-            (torch.log(mag_p + eps) - torch.log(mag_g + eps)) ** 2, mask
+            (torch.log(mag_p + eps_mag) - torch.log(mag_g + eps_mag)) ** 2, mask
         )
 
         dot = qx_p * qx_g + qy_p * qy_g
@@ -255,16 +261,8 @@ class TemperatureFieldLosses:
         unit_sq = (px - gx) ** 2 + (py - gy) ** 2
         l_dir_unit_mse = self._masked_mean(unit_sq, mask)
 
-        if direction_kind == "cosine":
-            l_dir = l_dir_cosine
-        elif direction_kind == "unit_mse":
-            l_dir = l_dir_unit_mse
-        else:
-            raise ValueError(
-                f"direction_kind must be 'cosine' or 'unit_mse', got {direction_kind!r}"
-            )
-
-        l_total = lambda_mag * l_mag + lambda_dir * l_dir
+        l_dir = lambda_dir_cosine * l_dir_cosine + lambda_dir_unit_mse * l_dir_unit_mse
+        l_total = lambda_mag * l_mag + l_dir
         out: dict[str, torch.Tensor] = {
             "L_mag": l_mag,
             "L_dir": l_dir,

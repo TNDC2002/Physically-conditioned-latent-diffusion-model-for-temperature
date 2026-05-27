@@ -56,9 +56,9 @@ model:
   # Anisotropic Transport: R̂ vs normalized COSMO-CLM (not ERA5 T_c)
   anisotropic_transport_coef: 1.0e-9
   at_lambda_mag: 1.0
-  at_lambda_dir: 1.0
+  at_lambda_dir_cosine: 1.0
+  at_lambda_dir_unit_mse: 0.0
   at_loss_eps: 1.0e-12
-  at_direction_loss: cosine # cosine or unit_mse
   at_dx: 2000.0
   at_dy: -2000.0
   # Non-pretrain profile: RMSE + AT (zeros omitted; see configs/CONTROL_METRIC_WEIGHTS.md).

@@ -94,13 +94,17 @@ pde_mode: "temp"
 temp_pde_coef: 0.0
 temp_pde_num_supercells: 8
 
-# Anisotropic Transport Loss: L = at_lambda_mag * L_mag + at_lambda_dir * L_dir
+# Anisotropic Transport Loss:
+# L = at_lambda_mag * L_mag
+#   + at_lambda_dir_cosine * L_dir_cosine
+#   + at_lambda_dir_unit_mse * L_dir_unit_mse
 # on reconstructed R̂ vs normalized COSMO-CLM (T_hr). Scaled by anisotropic_transport_coef.
 anisotropic_transport_coef: 0.0
 at_lambda_mag: 1.0
-at_lambda_dir: 1.0
+at_lambda_dir_cosine: 1.0
+at_lambda_dir_unit_mse: 0.0
+# Directional stabilization only (cosine + unit-vector); L_mag uses fixed eps in code.
 at_loss_eps: 1.0e-12
-at_direction_loss: cosine
 at_dx: 2000.0
 at_dy: -2000.0
 # GT |q| mask modes (combine with AND if both set; mask never uses |q_pred|):

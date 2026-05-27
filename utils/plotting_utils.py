@@ -406,11 +406,35 @@ def summarize_q_mask_thresholds(
     skip_quantile_pct: float = 0.0,
     abs_threshold: float | None = None,
     time_label: str | None = None,
+    training_at_qmag_min: float | None = None,
 ) -> pd.DataFrame:
-    """Log |q| cutoff used for masking (pixels with |q| <= threshold are filtered out)."""
+    """Log |q| cutoff used for masking (pixels with |q| <= threshold are filtered out).
+
+    Table columns document what enters the mask:
+
+    - **|q| used for mask**: ``hypot(qx, qy)`` from the same ``T`` as this row's flux dict.
+    - **Plot rule**: hide arrow / purple dot where ``|q| <= |q|_filter_threshold``.
+    - **Training (LMM)**: ``TemperatureFieldLosses`` keeps pixels with
+      ``|q_gt| > at_qmag_min`` on **normalized** ``T_hr`` (COSMO-CLM z-score) only;
+      ``q_pred`` does not affect the mask. Plot matches training only when the row's
+      ``T`` is that normalized GT and ``abs_threshold == at_qmag_min`` (strict ``>`` kept).
+    """
     mode = _normalize_q_mask_mode(
         mode, skip_quantile_pct=skip_quantile_pct, abs_threshold=abs_threshold
     )
+    if mode == "absolute":
+        plot_rule = (
+            f"plot: skip |q| <= {abs_threshold:g}; "
+            "training: keep |q_gt| > at_qmag_min (GT normalized T_hr only)"
+        )
+    elif mode == "quantile":
+        plot_rule = (
+            f"plot: skip |q| <= p{skip_quantile_pct:g} of this row's |q|; "
+            "training: keep |q_gt| >= batch quantile if at_qmag_quantile set"
+        )
+    else:
+        plot_rule = "no mask (all pixels plotted; training may still use at_qmag_min)"
+
     rows = []
     for model, flux in flux_by_model.items():
         q_mag, skip, thr, _ = _q_mag_and_mask(
@@ -421,11 +445,22 @@ def summarize_q_mask_thresholds(
             abs_threshold=abs_threshold,
         )
         keep = ~skip
+        matches_training = (
+            mode == "absolute"
+            and training_at_qmag_min is not None
+            and abs_threshold is not None
+            and float(abs_threshold) == float(training_at_qmag_min)
+            and "z-score" in str(model)
+        )
         rows.append(
             {
                 "time": time_label,
                 "model": model,
+                "|q| used for mask": "hypot(qx, qy) from this row's T (see model name for Kelvin vs z-score)",
                 "mask_mode": mode,
+                "plot mask rule": plot_rule,
+                "matches training at_qmag_min?": matches_training,
+                "training at_qmag_min ref": training_at_qmag_min,
                 "skip_quantile_%": skip_quantile_pct if mode == "quantile" else np.nan,
                 "abs_threshold_input": abs_threshold if mode == "absolute" else np.nan,
                 "|q|_filter_threshold": thr,
@@ -660,8 +695,12 @@ def show_q_snapshots(
     q_deep_zoom_x: tuple[float, float] | None = None,
     q_deep_zoom_y: tuple[float, float] | None = None,
     q_deep_zoom_stride: int | None = None,
+    show_grad_j_panels: bool = True,
+    temperature_unit_label: str | None = None,
 ):
     """Plot precomputed flux fields (7 panels per model, 3×3 WS10 layout).
+
+    Set ``show_grad_j_panels=False`` for **q-only** (one row: domain | zoom | deep zoom).
 
     Row 1: flux **q** — domain | zoom | **deep zoom** (panel G, denser quiver).
 
@@ -693,7 +732,8 @@ def show_q_snapshots(
     _validate_flux_by_model(flux_by_model, my_models)
     rig_max = len(my_models)
     var = variable
-    labels = {"2mT": "[K]"}
+    t_unit = temperature_unit_label if temperature_unit_label is not None else "[K]"
+    labels = {"2mT": t_unit}
     min_value = min(spat_dist_df["min"])
     max_value = max(spat_dist_df["max"])
 
@@ -703,9 +743,9 @@ def show_q_snapshots(
         q_deep_zoom_stride if q_deep_zoom_stride is not None else _DEFAULT_Q_DEEP_ZOOM_STRIDE
     )
 
-    n_panels = 7
+    n_panels = 7 if show_grad_j_panels else _N_Q_PANELS
     ncols = 3
-    nrows_per_model = 3
+    nrows_per_model = 3 if show_grad_j_panels else 1
     n_slots_per_model = nrows_per_model * ncols
     nrows = rig_max * nrows_per_model
     fig, axs = plt.subplots(
@@ -771,23 +811,22 @@ def show_q_snapshots(
         qx_d, qy_d, q_tag, q_key = _vectors_for_quiver_display(
             qx_plot, qy_plot, q_boost, **disp_kw
         )
-        gx_d, gy_d, g_tag, g_key = _vectors_for_quiver_display(
-            flux["dTdx"], flux["dTdy"], g_boost, **disp_kw
-        )
-
         field_q = _numpy_to_field_map(
             {"T": flux["T"], "qx": qx_d, "qy": qy_d}, target_grid, t_var=var
         )
-        field_grad = _numpy_to_field_map(
-            {"T": flux["T"], "qx": gx_d, "qy": gy_d}, target_grid, t_var=var
-        )
-        field_j_grad = _numpy_to_field_map(
-            {"T": flux["T"], "dTdx": gx_d, "dTdy": gy_d, "J_trace": flux["J_trace"]},
-            target_grid,
-            t_var=var,
-        )
-
-        j_tr_vmax = float(np.nanpercentile(flux["J_trace"], 99)) or 1.0
+        if show_grad_j_panels:
+            gx_d, gy_d, g_tag, g_key = _vectors_for_quiver_display(
+                flux["dTdx"], flux["dTdy"], g_boost, **disp_kw
+            )
+            field_grad = _numpy_to_field_map(
+                {"T": flux["T"], "qx": gx_d, "qy": gy_d}, target_grid, t_var=var
+            )
+            field_j_grad = _numpy_to_field_map(
+                {"T": flux["T"], "dTdx": gx_d, "dTdy": gy_d, "J_trace": flux["J_trace"]},
+                target_grid,
+                t_var=var,
+            )
+            j_tr_vmax = float(np.nanpercentile(flux["J_trace"], 99)) or 1.0
 
         for panel in range(n_slots_per_model):
             grid_row = sim_row * nrows_per_model + panel // ncols
@@ -804,7 +843,10 @@ def show_q_snapshots(
                 q_deep_zoom_y=q_deep_y,
                 q_deep_zoom_stride=q_deep_stride,
             )
-            row_ylabel = sim if panel // ncols == 0 else ("grad T & J" if panel // ncols == 1 else "")
+            if panel // ncols == 0 or not show_grad_j_panels:
+                row_ylabel = sim
+            else:
+                row_ylabel = "grad T & J" if panel // ncols == 1 else ""
             _style_q_panel_ax(
                 ax, x_lim, y_lim, gdf_bn, borders_file, sim, col, ylabel=row_ylabel if col == 0 else None
             )
@@ -827,7 +869,7 @@ def show_q_snapshots(
                     y_lim=y_lim,
                     q_skip_mask=q_skip_mask if _q_mask_mode_used != "none" else None,
                 )
-            elif kind == "grad":
+            elif show_grad_j_panels and kind == "grad":
                 im_mag = _plot_jet_T_quiver_panel(
                     ax,
                     field_grad,
@@ -842,7 +884,7 @@ def show_q_snapshots(
                     x_lim=x_lim,
                     y_lim=y_lim,
                 )
-            else:
+            elif show_grad_j_panels:
                 im_mag = _plot_jet_T_Jtrace_panel(
                     ax,
                     field_j_grad,

@@ -36,9 +36,9 @@ class LatentMeanFlowLitModule(LightningModule):
         temp_pde_num_supercells: int = 8,
         anisotropic_transport_coef: float = 0.0,
         at_lambda_mag: float = 1.0,
-        at_lambda_dir: float = 1.0,
+        at_lambda_dir_cosine: float = 1.0,
+        at_lambda_dir_unit_mse: float = 0.0,
         at_loss_eps: float = 1e-12,
-        at_direction_loss: str = "cosine",
         at_dx: float = 2000.0,
         at_dy: float = -2000.0,
         at_qmag_quantile: Optional[float] = None,
@@ -60,9 +60,9 @@ class LatentMeanFlowLitModule(LightningModule):
         self.temp_pde_num_supercells = int(temp_pde_num_supercells)
         self.anisotropic_transport_coef = float(anisotropic_transport_coef)
         self.at_lambda_mag = float(at_lambda_mag)
-        self.at_lambda_dir = float(at_lambda_dir)
+        self.at_lambda_dir_cosine = float(at_lambda_dir_cosine)
+        self.at_lambda_dir_unit_mse = float(at_lambda_dir_unit_mse)
         self.at_loss_eps = float(at_loss_eps)
-        self.at_direction_loss = str(at_direction_loss)
         self.at_dx = float(at_dx)
         self.at_dy = float(at_dy)
         self.at_qmag_quantile = (
@@ -212,8 +212,8 @@ class LatentMeanFlowLitModule(LightningModule):
                     dy=self.at_dy,
                     eps=self.at_loss_eps,
                     lambda_mag=self.at_lambda_mag,
-                    lambda_dir=self.at_lambda_dir,
-                    direction_kind=self.at_direction_loss,
+                    lambda_dir_cosine=self.at_lambda_dir_cosine,
+                    lambda_dir_unit_mse=self.at_lambda_dir_unit_mse,
                     qmag_quantile=self.at_qmag_quantile,
                     qmag_min=self.at_qmag_min,
                 )
@@ -297,6 +297,7 @@ class LatentMeanFlowLitModule(LightningModule):
             metrics["at_dir_pure_cosine"] = pure_phys.get("at_dir_pure_cosine", z_phys)
             metrics["at_dir_pure_unit_mse"] = pure_phys.get("at_dir_pure_unit_mse", z_phys)
             metrics["at_mask_frac"] = pure_phys.get("at_mask_frac", z_phys)
+            metrics["at_mask_filtered_pct"] = (1.0 - metrics["at_mask_frac"]) * 100.0
 
         return total_loss, metrics
 
@@ -340,6 +341,10 @@ class LatentMeanFlowLitModule(LightningModule):
             prog_bar=prog_bar,
         )
         self.log(f"{prefix}/phys_loss", metrics["phys_loss"], **log_params)
+        if self.anisotropic_transport_coef > 0 and (
+            self.at_qmag_quantile is not None or self.at_qmag_min is not None
+        ):
+            self.log(f"{prefix}/at_mask_filtered_pct", metrics["at_mask_filtered_pct"], **log_params)
 
     def shared_step(self, batch, create_graph: bool):
         latent_target, context_dict = self.build_latent_and_context(batch)

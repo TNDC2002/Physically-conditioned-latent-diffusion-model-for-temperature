@@ -24,15 +24,21 @@ def test_anisotropic_transport_loss():
     R_hat = torch.randn(2, 1, 32, 32)
     T_hr = torch.randn(2, 1, 32, 32)
     out = phys.anisotropic_transport_loss(
-        R_hat, T_hr, dx=2000.0, dy=-2000.0, lambda_mag=1.0, lambda_dir=0.5, direction_kind="cosine"
+        R_hat,
+        T_hr,
+        dx=2000.0,
+        dy=-2000.0,
+        lambda_mag=1.0,
+        lambda_dir_cosine=0.5,
+        lambda_dir_unit_mse=0.0,
     )
     base_keys = {"L_mag", "L_dir", "L_dir_cosine", "L_dir_unit_mse", "L_total"}
     assert set(out.keys()) == base_keys
     for v in out.values():
         assert v.ndim == 0
         assert torch.isfinite(v)
-    assert torch.allclose(out["L_dir"], out["L_dir_cosine"])
-    assert torch.allclose(out["L_total"], 1.0 * out["L_mag"] + 0.5 * out["L_dir"])
+    assert torch.allclose(out["L_dir"], 0.5 * out["L_dir_cosine"])
+    assert torch.allclose(out["L_total"], 1.0 * out["L_mag"] + 0.5 * out["L_dir_cosine"])
 
 
 def test_anisotropic_transport_loss_qmag_mask():

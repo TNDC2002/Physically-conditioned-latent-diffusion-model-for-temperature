@@ -16,7 +16,8 @@ tags: ["downscaling", "lmm_res_2mT"]
 
 # Weight init from this LMM ckpt (``load_optimizer_state: false`` → weights only; see ``src/train.py``).
 # Set to ``null`` to initialize from random weights.
-ckpt_path: ${paths.root_dir}/logs/train/runs/2026-05-14_07-18-49/checkpoints/best_LMM_res_2mT_epoch_020.ckpt
+# ckpt_path: ${paths.root_dir}/logs/train/runs/2026-05-14_07-18-49/checkpoints/best_LMM_res_2mT_epoch_020.ckpt
+ckpt_path: ${paths.root_dir}/logs/train/runs/2026-05-26_17-27-28/checkpoints/best_LMM_res_2mT_epoch_011.ckpt
 
 load_optimizer_state: false
 
@@ -71,17 +72,19 @@ model:
   temp_pde_num_supercells: 8
   # Anisotropic Transport: R̂ vs normalized COSMO-CLM (not ERA5 T_c)
   anisotropic_transport_coef: 1.0e-9
-  # at_lambda_mag: 1.0e-6 # for cosine loss
-  # at_lambda_dir: 1.0e+9 # for cosine loss
-  at_lambda_mag: 0.1 # for unit_mse loss
-  at_lambda_dir: 1.0 # for unit_mse loss
-  at_loss_eps: 1.0e-20
-  at_direction_loss: unit_mse # cosine or unit_mse
+  # Example cosine-only:
+  # at_lambda_mag: 1.0e-6
+  # at_lambda_dir_cosine: 1.0e+9
+  # at_lambda_dir_unit_mse: 0.0
+  at_lambda_mag: 0.01
+  at_lambda_dir_cosine: 1.0
+  at_lambda_dir_unit_mse: 1.0
+  at_loss_eps: 1.0e-15
   at_dx: 2000.0
   at_dy: -2000.0
   # GT |q| masks (AND if both set): quantile and/or absolute floor on |q_gt|.
   # at_qmag_quantile: 0.5
-  at_qmag_min: 1.0e-10   # alternative/complement: drop |q_gt| <= 1e-10
+  at_qmag_min: 1.0e-15   # alternative/complement: drop |q_gt| <= 1e-10
   autoencoder:
     unet_regr:
       ckpt_path: ${paths.pretrained_models_dir}UNET_2mT.ckpt

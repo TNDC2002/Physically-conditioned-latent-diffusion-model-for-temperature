@@ -30,9 +30,9 @@ model:
   temp_pde_num_supercells: 8
   anisotropic_transport_coef: 1.0e-9
   at_lambda_mag: 1.0
-  at_lambda_dir: 1.0
+  at_lambda_dir_cosine: 1.0
+  at_lambda_dir_unit_mse: 0.0
   at_loss_eps: 1.0e-12
-  at_direction_loss: cosine
   at_dx: 2000.0
   at_dy: -2000.0
   autoencoder:
