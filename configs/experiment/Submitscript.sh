@@ -38,5 +38,5 @@ sbatch \
             export PYTHONPATH=$REPO_ROOT:\$PYTHONPATH && \
             export OMP_NUM_THREADS=1 && \
             $REPO_ROOT/.venv/bin/python src/train.py \
-                    experiment=downscaling_LMM_res_2mT_pretrain \
+                    experiment=downscaling_LMM_res_2mT_pretrain_MSEdir \
                     data.num_workers=$DATA_NUM_WORKERS"

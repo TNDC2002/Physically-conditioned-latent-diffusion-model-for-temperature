@@ -1,0 +1,137 @@
+# @package _global_
+#
+# Run:  python src/train.py experiment=downscaling_LMM_res_2mT_pretrain
+# SLURM: configs/experiment/Submitscript.sh (cluster + ``data.num_workers`` only; training lives here)
+# MIG:   experiment=downscaling_LMM_res_2mT_MIG — see Submitscript_MIG_LMM.sh
+#
+# Point ``model.autoencoder.unet_regr.ckpt_path`` and ``model.ae_load_state_file`` to your
+# Stage-0 UNET and Stage-1 VAE checkpoints (see downscaling_LDM_res_2mT.yaml).
+
+defaults:
+  - override /model: lmm.yaml
+  - override /logger: tensorboard.yaml
+  - override /trainer: gpu.yaml
+
+tags: ["downscaling", "lmm_res_2mT"]
+
+# Weight init from this LMM ckpt (``load_optimizer_state: false`` → weights only; see ``src/train.py``).
+# Set to ``null`` to initialize from random weights.
+ckpt_path: ${paths.root_dir}/logs/train/runs/2026-05-27_16-33-28/checkpoints/best_LMM_res_2mT_epoch_033.ckpt
+
+load_optimizer_state: false
+
+# Optional: pin Hydra output when continuing in the same run directory (see ``downscaling_LMM_res_2mT.yaml``).
+# hydra:
+#   run:
+#     dir: ${paths.root_dir}/logs/train/runs/2026-05-22_16-16-17
+
+# Used at end of training for test selection (first ModelCheckpoint in trainer is the best-k one below).
+optimized_metric: val/control_score
+
+reset_scheduler_on_resume: true
+reset_lr_to_default_on_resume: true
+reset_lr_default_value: null
+
+paths:
+  data_dir: ${paths.root_dir}/LDM-downscaling/full_Dataset/
+
+trainer:
+  max_epochs: 100
+  devices: 2
+  strategy: ddp_find_unused_parameters_true
+  gradient_clip_val: 1.0
+  gradient_clip_algorithm: norm
+
+
+data:
+  target_vars:
+    high_res: ["2mT"]
+  crop_size: 512
+  batch_size: 25
+  num_workers: 8
+  nn_lowres: false
+
+model:
+  trainable_parts:
+    - "mf_unet.middle_block"
+    - "mf_unet.output_blocks"
+    - "mf_unet.out"
+
+
+  # Only non-zero keys affect val/control_score (defaults in lmm_module + lmm.yaml are 0).
+  control_metric_weights:
+    mf_minus_1: 1.0e8
+    at_mag_pure: 0.01
+    at_dir_pure: 0.1
+
+  use_ema: true
+  pde_lambda: 0.0
+  temp_pde_coef: 0.0
+  pde_mode: "temp"
+  temp_pde_num_supercells: 8
+  # Anisotropic Transport: R̂ vs normalized COSMO-CLM (not ERA5 T_c)
+  anisotropic_transport_coef: 1.0e-9
+  at_lambda_mag: 0.01
+  at_lambda_dir_cosine: 0.0
+  at_lambda_dir_unit_mse: 1.0
+  at_loss_eps: 1.0e-15
+  at_dx: 2000.0
+  at_dy: -2000.0
+  # GT |q| masks (AND if both set): quantile and/or absolute floor on |q_gt|.
+  # at_qmag_quantile: 0.5
+  at_qmag_min: 1.0e-15   # alternative/complement: drop |q_gt| <= 1e-10
+  autoencoder:
+    unet_regr:
+      ckpt_path: ${paths.pretrained_models_dir}UNET_2mT.ckpt
+  ae_load_state_file: ${paths.pretrained_models_dir}VAE_residual_2mT.ckpt
+
+callbacks:
+  rich_progress_bar: null
+
+  # Checkpoints: use THREE ModelCheckpoint callbacks. A single callback with every_n_epochs: 5 ties
+  # that interval to top-k / last logic, so you lose "true best at any epoch" and can miss periodic saves.
+  #
+  # 1) Best weights whenever val/control_score improves (any epoch).
+  # 2) A full ckpt every 5 completed epochs (after validation): 5, 10, 15, … (monitor=null, save_top_k=-1).
+  # 3) last.ckpt every validation (save_last only; every_n_epochs=0 disables extra top-k saves here).
+
+  model_checkpoint:
+    filename: "best_LMM_res_2mT_epoch_{epoch:03d}"
+    monitor: val/control_score
+    mode: min
+    save_top_k: 1
+    save_last: false
+    auto_insert_metric_name: false
+    verbose: false
+    every_n_epochs: null
+
+  model_checkpoint_periodic:
+    _target_: lightning.pytorch.callbacks.ModelCheckpoint
+    dirpath: ${paths.output_dir}/checkpoints
+    filename: "LMM_res_2mT_every5_epoch_{epoch:03d}"
+    monitor: null
+    mode: min
+    save_top_k: -1
+    save_last: false
+    auto_insert_metric_name: false
+    verbose: false
+    every_n_epochs: 5
+    save_on_train_epoch_end: false
+
+  model_checkpoint_last:
+    _target_: lightning.pytorch.callbacks.ModelCheckpoint
+    dirpath: ${paths.output_dir}/checkpoints
+    monitor: null
+    mode: min
+    save_top_k: 0
+    save_last: true
+    auto_insert_metric_name: false
+    verbose: false
+    every_n_epochs: 0
+    save_on_train_epoch_end: false
+
+  early_stopping:
+    patience: 10
+    monitor: val/control_score
+    mode: min
+    verbose: true
