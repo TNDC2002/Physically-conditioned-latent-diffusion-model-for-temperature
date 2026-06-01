@@ -463,6 +463,26 @@ def _style_q_panel_ax(
 
 # WS10 / 7bf7bad: quiver ``scale=200`` only — do not use scale_units='xy' on lon/lat in metres.
 _QUIVER_SCALE = 200
+# Deep-zoom: larger ``scale`` → shorter arrows on screen; thinner shafts via width/linewidth.
+_QUIVER_SCALE_DEEP = 420
+_QUIVER_WIDTH_PAPER = 0.0016
+_QUIVER_LINEWIDTH_PAPER = 0.35
+_QUIVER_HEADWIDTH_PAPER = 2.6
+_QUIVER_HEADLENGTH_PAPER = 3.8
+
+
+def _quiver_kwargs(*, paper: bool = False, color: str | None = None) -> dict:
+    kw = dict(scale=_QUIVER_SCALE_DEEP if paper else _QUIVER_SCALE, add_guide=False)
+    if paper:
+        kw.update(
+            width=_QUIVER_WIDTH_PAPER,
+            linewidth=_QUIVER_LINEWIDTH_PAPER,
+            headwidth=_QUIVER_HEADWIDTH_PAPER,
+            headlength=_QUIVER_HEADLENGTH_PAPER,
+        )
+    if color is not None:
+        kw["color"] = color
+    return kw
 
 
 def _normalize_q_mask_mode(
@@ -694,9 +714,10 @@ def _plot_jet_T_quiver_panel_paper(
     q_skip_mask: np.ndarray | None = None,
     x_lim=None,
     y_lim=None,
+    quiver_ref: float = 8.0,
     legend_fontsize: float = 7.0,
 ):
-    """Deep-zoom paper panel: temperature + quiver, no quiverkey or inset box."""
+    """Deep-zoom paper panel: temperature + quiver (quiverkey note, same style as panel C)."""
     mappable = field_map[t_var].plot.imshow(
         ax=ax,
         robust=True,
@@ -714,71 +735,86 @@ def _plot_jet_T_quiver_panel_paper(
         v=v_var,
         x="lon",
         y="lat",
-        scale=_QUIVER_SCALE,
-        add_guide=False,
+        **_quiver_kwargs(paper=True, color=quiver_color),  # thin shafts (deep-zoom)
     )
-    if quiver_color is not None:
-        quiver_kw["color"] = quiver_color
-    _thin_field_map(field_map, stride_lat, stride_lon).plot.quiver(**quiver_kw)
+    q_plot = _thin_field_map(field_map, stride_lat, stride_lon).plot.quiver(**quiver_kw)
     if q_skip_mask is not None:
         _plot_q_mask_skip_dots(ax, field_map, q_skip_mask, stride_lat, stride_lon)
     if x_lim is not None and y_lim is not None:
         _finalize_paper_map_ax(ax, x_lim, y_lim)
     _add_paper_flux_vector_note(
         ax,
+        q_plot,
+        quiver_ref,
         show_mask_dots=q_skip_mask is not None,
         fontsize=legend_fontsize,
     )
     return mappable
 
 
-def _add_paper_flux_vector_note(ax, *, show_mask_dots: bool, fontsize: float = 7.0) -> None:
-    """In-panel legend (lower right): purple dot + arrow samples."""
-    ms = max(5.0, fontsize * 0.75)
-    handles: list[Line2D] = []
-    labels: list[str] = []
+def _add_paper_flux_vector_note(
+    ax,
+    quiver_plot,
+    quiver_ref: float,
+    *,
+    show_mask_dots: bool,
+    fontsize: float = 7.0,
+) -> None:
+    """Lower-right white note: purple dot + quiverkey (panel C style), one shared box."""
+    fs = fontsize
+    x0, y0, w = 0.47, 0.012, 0.51
+    h = 0.105 if show_mask_dots else 0.062
+    ax.add_patch(
+        patches.Rectangle(
+            (x0, y0),
+            w,
+            h,
+            transform=ax.transAxes,
+            facecolor="white",
+            edgecolor="0.45",
+            linewidth=0.8,
+            alpha=0.88,
+            zorder=14,
+            clip_on=False,
+        )
+    )
     if show_mask_dots:
-        handles.append(
-            Line2D(
-                [0],
-                [0],
-                linestyle="None",
-                marker="o",
-                markerfacecolor="purple",
-                markeredgecolor="purple",
-                alpha=0.85,
-                markersize=ms,
-            )
+        y_row1 = y0 + h * 0.73
+        ax.plot(
+            x0 + 0.035,
+            y_row1,
+            marker="o",
+            color="purple",
+            linestyle="none",
+            markersize=max(4.0, fs * 0.55),
+            transform=ax.transAxes,
+            zorder=15,
+            clip_on=False,
         )
-        labels.append("Filtered |q|")
-    handles.append(
-        Line2D(
-            [0, 1],
-            [0, 0],
-            color="black",
-            linewidth=1.6,
-            linestyle="-",
-            marker=">",
-            markersize=ms,
-            markevery=[1],
-            solid_capstyle="butt",
+        ax.text(
+            x0 + 0.085,
+            y_row1,
+            "Filtered |q|",
+            transform=ax.transAxes,
+            fontsize=fs,
+            va="center",
+            ha="left",
+            zorder=15,
+            clip_on=False,
         )
-    )
-    labels.append("Retained q")
-    leg = ax.legend(
-        handles,
-        labels,
-        loc="lower right",
-        fontsize=fontsize,
-        framealpha=0.88,
-        edgecolor="0.45",
-        fancybox=False,
-        borderpad=0.55,
-        labelspacing=0.45,
-        handlelength=2.0,
-        handletextpad=0.55,
-    )
-    leg.set_zorder(15)
+        qk_y = y0 + h * 0.27
+    else:
+        qk_y = y0 + h * 0.5
+    ax.quiverkey(
+        quiver_plot,
+        x0 + 0.035,
+        qk_y,
+        quiver_ref,
+        "Retained q",
+        labelpos="E",
+        coordinates="axes",
+        fontproperties={"size": fs},
+    ).set_zorder(15)
 
 
 def _style_paper_deep_zoom_ax(ax, x_lim, y_lim, gdf_bn, borders_file):
@@ -820,6 +856,7 @@ def _plot_jet_T_quiver_panel(
     y_lim,
     quiver_color: str | None = None,
     q_skip_mask: np.ndarray | None = None,
+    thin_quiver: bool = False,
 ):
     """WS10-style panel: ``jet`` 2mT background + vector overlay."""
     mappable = field_map[t_var].plot.imshow(
@@ -839,29 +876,37 @@ def _plot_jet_T_quiver_panel(
         v=v_var,
         x="lon",
         y="lat",
-        scale=_QUIVER_SCALE,
-        add_guide=False,
+        **_quiver_kwargs(paper=thin_quiver, color=quiver_color),
     )
-    if quiver_color is not None:
-        quiver_kw["color"] = quiver_color
     q_plot = _thin_field_map(field_map, stride_lat, stride_lon).plot.quiver(**quiver_kw)
-    _add_ws10_quiverkey(q_plot, quiver_ref, quiver_label)
+    _add_ws10_quiverkey(q_plot, quiver_ref, quiver_label, ax=ax)
     if q_skip_mask is not None:
         _plot_q_mask_skip_dots(ax, field_map, q_skip_mask, stride_lat, stride_lon)
     _add_ws10_key_box(ax, x_lim, y_lim)
     return mappable
 
 
-def _add_ws10_quiverkey(quiver_plot, ref_len: float, label: str):
-    plt.quiverkey(
+def _add_ws10_quiverkey(
+    quiver_plot,
+    ref_len: float,
+    label: str,
+    *,
+    ax=None,
+    x: float = 0.9,
+    y: float = 0.07,
+    labelpos: str = "S",
+    fontsize: float = 13,
+):
+    axes = ax if ax is not None else plt.gca()
+    axes.quiverkey(
         quiver_plot,
-        0.9,
-        0.07,
+        x,
+        y,
         ref_len,
         label,
-        labelpos="S",
+        labelpos=labelpos,
         coordinates="axes",
-        fontproperties={"size": 13},
+        fontproperties={"size": fontsize},
     ).set_zorder(11)
 
 
@@ -1240,6 +1285,7 @@ def show_q_snapshots(
                         q_skip_mask=q_mask_on_ax,
                         x_lim=x_lim,
                         y_lim=y_lim,
+                        quiver_ref=q_key,
                         legend_fontsize=(
                             paper_fonts["legend"] if paper_fonts is not None else 7.0
                         ),
@@ -1260,6 +1306,7 @@ def show_q_snapshots(
                         x_lim=x_lim,
                         y_lim=y_lim,
                         q_skip_mask=q_mask_on_ax,
+                        thin_quiver=(panel == 2),
                     )
             elif show_grad_j_panels and kind == "grad":
                 im_mag = _plot_jet_T_quiver_panel(
@@ -1300,7 +1347,7 @@ def show_q_snapshots(
                     color="w",
                     alpha=0.9,
                 )
-                _add_ws10_quiverkey(q_k, g_key, f"grad T {g_tag}")
+                _add_ws10_quiverkey(q_k, g_key, f"grad T {g_tag}", ax=ax)
                 ax.text(
                     0.02,
                     0.88,
@@ -1380,7 +1427,7 @@ def show_q_deep_zoom_paper(
     use_quiver_lens: bool = True,
     display_magnitude_gamma: float = 0.45,
     display_min_arrow_frac: float = 0.15,
-    display_max_arrow_frac: float = 1.0,
+    display_max_arrow_frac: float = 0.6,
     q_mask_mode: str = "none",
     q_mask_skip_quantile_pct: float = 0.0,
     q_mask_abs_threshold: float | None = None,
