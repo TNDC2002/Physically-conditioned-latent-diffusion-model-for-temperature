@@ -1,2 +1,2 @@
-- experiment=downscaling_LMM_res_2mT_pretrain
+- experiment=downscaling_LMM_res_2mT_pretrain_MSEdir
 - data.num_workers=6

@@ -122,12 +122,12 @@ hydra:
     - hydra.job.name=train_ddp_process_1
     - hydra.mode=RUN
     task:
-    - experiment=downscaling_LMM_res_2mT_pretrain
+    - experiment=downscaling_LMM_res_2mT_pretrain_MSEdir
     - data.num_workers=6
   job:
     name: train_ddp_process_1
     chdir: null
-    override_dirname: data.num_workers=6,experiment=downscaling_LMM_res_2mT_pretrain
+    override_dirname: data.num_workers=6,experiment=downscaling_LMM_res_2mT_pretrain_MSEdir
     id: ???
     num: ???
     config_name: train.yaml
@@ -160,7 +160,7 @@ hydra:
       debug: null
       local: default.yaml
       hparams_search: null
-      experiment: downscaling_LMM_res_2mT_pretrain
+      experiment: downscaling_LMM_res_2mT_pretrain_MSEdir
       hydra: default.yaml
       extras: default.yaml
       paths: default.yaml

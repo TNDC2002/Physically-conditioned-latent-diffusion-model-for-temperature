@@ -5,7 +5,7 @@ tags:
 train: true
 test: true
 compile: false
-ckpt_path: ${paths.root_dir}/logs/train/runs/2026-05-26_17-27-28/checkpoints/best_LMM_res_2mT_epoch_020.ckpt
+ckpt_path: ${paths.root_dir}/logs/train/runs/2026-05-27_16-33-28/checkpoints/best_LMM_res_2mT_epoch_033.ckpt
 reset_scheduler_on_resume: true
 reset_lr_to_default_on_resume: true
 reset_lr_default_value: null
@@ -143,7 +143,7 @@ model:
   temp_pde_num_supercells: 8
   anisotropic_transport_coef: 1.0e-09
   at_lambda_mag: 0.01
-  at_lambda_dir_cosine: 1.0
+  at_lambda_dir_cosine: 0.0
   at_lambda_dir_unit_mse: 1.0
   at_loss_eps: 1.0e-15
   at_dx: 2000.0

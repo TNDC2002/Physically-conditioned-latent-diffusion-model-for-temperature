@@ -1,5 +1,6 @@
 import geopandas as gpd
 from matplotlib import pyplot as plt
+from matplotlib.lines import Line2D
 import matplotlib.patches as patches
 import xarray as xr
 import pandas as pd
@@ -335,6 +336,115 @@ def _panel_limits(
     return x_lim, y_lim, pick_stride
 
 
+def _expand_geo_limits(
+    x_lim,
+    y_lim,
+    *,
+    lon_mult: float = 1.0,
+    lat_mult: float = 1.0,
+) -> tuple[list[float], list[float]]:
+    """Widen the map window around its centre (EPSG m). ``2`` = 2× span on that axis."""
+    lon_mult = max(1e-6, float(lon_mult))
+    lat_mult = max(1e-6, float(lat_mult))
+    x0, x1 = float(x_lim[0]), float(x_lim[1])
+    y0, y1 = float(y_lim[0]), float(y_lim[1])
+    x_c, y_c = (x0 + x1) / 2.0, (y0 + y1) / 2.0
+    x_half = abs(x1 - x0) / 2.0 * lon_mult
+    y_half = abs(y1 - y0) / 2.0 * lat_mult
+    return [x_c - x_half, x_c + x_half], [y_c - y_half, y_c + y_half]
+
+
+def _crop_field_map_to_geo_box(
+    field_map: xr.Dataset, x_lim, y_lim
+) -> xr.Dataset:
+    """Select grid cells inside ``x_lim`` / ``y_lim`` (EPSG m on lon/lat coords)."""
+    x0, x1 = sorted((float(x_lim[0]), float(x_lim[1])))
+    y0, y1 = sorted((float(y_lim[0]), float(y_lim[1])))
+    lon = field_map["lon"]
+    lat = field_map["lat"]
+    return field_map.isel(
+        lon=(lon >= x0) & (lon <= x1),
+        lat=(lat >= y0) & (lat <= y1),
+    )
+
+
+def _crop_mask_to_geo_box(
+    mask: np.ndarray, field_map: xr.Dataset, x_lim, y_lim
+) -> np.ndarray:
+    """Crop a 2-D mask (lat, lon) to the same geo box as ``_crop_field_map_to_geo_box``."""
+    da = xr.DataArray(
+        np.asarray(mask, dtype=bool),
+        coords={"lat": field_map["lat"], "lon": field_map["lon"]},
+        dims=["lat", "lon"],
+    )
+    return (
+        _crop_field_map_to_geo_box(da.to_dataset(name="_m"), x_lim, y_lim)["_m"]
+        .values
+    )
+
+
+def _thin_field_map(
+    field_map: xr.Dataset, stride_lat: int, stride_lon: int | None = None
+) -> xr.Dataset:
+    stride_lon = stride_lat if stride_lon is None else stride_lon
+    stride_lat = max(1, int(stride_lat))
+    stride_lon = max(1, int(stride_lon))
+    if stride_lat == stride_lon:
+        return field_map.thin(stride_lat)
+    return field_map.thin({"lat": stride_lat, "lon": stride_lon})
+
+
+def _thin_bool_mask(
+    skip_mask: np.ndarray,
+    field_map: xr.Dataset,
+    stride_lat: int,
+    stride_lon: int | None = None,
+) -> np.ndarray:
+    stride_lon = stride_lat if stride_lon is None else stride_lon
+    skip_da = xr.DataArray(
+        skip_mask.astype(bool),
+        coords={"lat": field_map["lat"], "lon": field_map["lon"]},
+        dims=["lat", "lon"],
+    )
+    if stride_lat == stride_lon:
+        return skip_da.thin(stride_lat).values
+    return skip_da.thin({"lat": stride_lat, "lon": stride_lon}).values
+
+
+def _paper_figsize_from_geo_extent(
+    x_lim,
+    y_lim,
+    height_in: float = 5.0,
+) -> tuple[float, float]:
+    """Figure (width, height) in inches matching the zoom box aspect (EPSG m)."""
+    x_span = abs(float(x_lim[1]) - float(x_lim[0]))
+    y_span = abs(float(y_lim[1]) - float(y_lim[0]))
+    if y_span <= 0:
+        y_span = 1.0
+    width_in = max(float(height_in) * (x_span / y_span), float(height_in) * 0.5)
+    return (width_in, float(height_in))
+
+
+# Base paper font sizes (pt) at reference min(fig_w, fig_h) = 5 in — scaled in _paper_font_sizes.
+_PAPER_FONT_REF_IN = 5.0
+
+
+def _paper_font_sizes(fig_w: float, fig_h: float) -> dict[str, float]:
+    """Scale header, colorbar, and legend fonts with figure size."""
+    fig_w, fig_h = float(fig_w), float(fig_h)
+    scale = min(fig_w, fig_h) / _PAPER_FONT_REF_IN
+    scale = float(np.clip(scale, 0.85, 4.0))
+    # Header uses √(area) so wide/tall figures (e.g. 10×20 in) get a larger title.
+    header_scale = float(np.sqrt(fig_w * fig_h)) / _PAPER_FONT_REF_IN
+    header_scale = float(np.clip(header_scale, 0.85, 4.0))
+    return {
+        "header": 9.0 * header_scale,
+        "cbar_label": 8.0 * scale,
+        "cbar_ticks": 7.0 * scale,
+        "legend": 7.0 * scale,
+    }
+
+
 def _style_q_panel_ax(
     ax, x_lim, y_lim, gdf_bn, borders_file, sim, col: int, *, ylabel: str | None = None
 ):
@@ -524,17 +634,18 @@ def apply_q_magnitude_mask(
     return qx_out, qy_out, skip, thr, mode
 
 
-def _plot_q_mask_skip_dots(ax, field_map: xr.Dataset, skip_mask: np.ndarray, pick_stride: int):
+def _plot_q_mask_skip_dots(
+    ax,
+    field_map: xr.Dataset,
+    skip_mask: np.ndarray,
+    stride_lat: int,
+    stride_lon: int | None = None,
+):
     """Purple markers at grid points where |q| was below the skip quantile."""
     if skip_mask is None or not np.any(skip_mask):
         return
-    skip_da = xr.DataArray(
-        skip_mask.astype(bool),
-        coords={"lat": field_map["lat"], "lon": field_map["lon"]},
-        dims=["lat", "lon"],
-    )
-    thinned = field_map.thin(pick_stride)
-    skip_thin = skip_da.thin(pick_stride).values
+    thinned = _thin_field_map(field_map, stride_lat, stride_lon)
+    skip_thin = _thin_bool_mask(skip_mask, field_map, stride_lat, stride_lon)
     if not np.any(skip_thin):
         return
     lon_2d, lat_2d = np.meshgrid(thinned["lon"].values, thinned["lat"].values)
@@ -549,6 +660,149 @@ def _plot_q_mask_skip_dots(ax, field_map: xr.Dataset, skip_mask: np.ndarray, pic
     )
 
 
+def _format_q_mask_caption(
+    *,
+    q_mask_mode: str = "none",
+    q_mask_skip_quantile_pct: float = 0.0,
+    q_mask_abs_threshold: float | None = None,
+) -> str:
+    """One-line caption for paper figures (masking only)."""
+    mode = _normalize_q_mask_mode(
+        q_mask_mode,
+        skip_quantile_pct=q_mask_skip_quantile_pct,
+        abs_threshold=q_mask_abs_threshold,
+    )
+    if mode == "none":
+        return "q mask: none"
+    if mode == "quantile":
+        return f"q mask: |q| ≤ p{q_mask_skip_quantile_pct:g} (masked, no arrow)"
+    return f"q mask: |q| ≤ {q_mask_abs_threshold:g} (masked, no arrow)"
+
+
+def _plot_jet_T_quiver_panel_paper(
+    ax,
+    field_map: xr.Dataset,
+    t_var: str,
+    *,
+    t_vmin: float,
+    t_vmax: float,
+    u_var: str,
+    v_var: str,
+    stride_lat: int,
+    stride_lon: int | None = None,
+    quiver_color: str | None = None,
+    q_skip_mask: np.ndarray | None = None,
+    x_lim=None,
+    y_lim=None,
+    legend_fontsize: float = 7.0,
+):
+    """Deep-zoom paper panel: temperature + quiver, no quiverkey or inset box."""
+    mappable = field_map[t_var].plot.imshow(
+        ax=ax,
+        robust=True,
+        add_colorbar=False,
+        x="lon",
+        y="lat",
+        cmap="jet",
+        alpha=0.8,
+        vmin=t_vmin,
+        vmax=t_vmax,
+    )
+    quiver_kw = dict(
+        ax=ax,
+        u=u_var,
+        v=v_var,
+        x="lon",
+        y="lat",
+        scale=_QUIVER_SCALE,
+        add_guide=False,
+    )
+    if quiver_color is not None:
+        quiver_kw["color"] = quiver_color
+    _thin_field_map(field_map, stride_lat, stride_lon).plot.quiver(**quiver_kw)
+    if q_skip_mask is not None:
+        _plot_q_mask_skip_dots(ax, field_map, q_skip_mask, stride_lat, stride_lon)
+    if x_lim is not None and y_lim is not None:
+        _finalize_paper_map_ax(ax, x_lim, y_lim)
+    _add_paper_flux_vector_note(
+        ax,
+        show_mask_dots=q_skip_mask is not None,
+        fontsize=legend_fontsize,
+    )
+    return mappable
+
+
+def _add_paper_flux_vector_note(ax, *, show_mask_dots: bool, fontsize: float = 7.0) -> None:
+    """In-panel legend (lower right): purple dot + arrow samples."""
+    ms = max(5.0, fontsize * 0.75)
+    handles: list[Line2D] = []
+    labels: list[str] = []
+    if show_mask_dots:
+        handles.append(
+            Line2D(
+                [0],
+                [0],
+                linestyle="None",
+                marker="o",
+                markerfacecolor="purple",
+                markeredgecolor="purple",
+                alpha=0.85,
+                markersize=ms,
+            )
+        )
+        labels.append("Filtered |q|")
+    handles.append(
+        Line2D(
+            [0, 1],
+            [0, 0],
+            color="black",
+            linewidth=1.6,
+            linestyle="-",
+            marker=">",
+            markersize=ms,
+            markevery=[1],
+            solid_capstyle="butt",
+        )
+    )
+    labels.append("Retained q")
+    leg = ax.legend(
+        handles,
+        labels,
+        loc="lower right",
+        fontsize=fontsize,
+        framealpha=0.88,
+        edgecolor="0.45",
+        fancybox=False,
+        borderpad=0.55,
+        labelspacing=0.45,
+        handlelength=2.0,
+        handletextpad=0.55,
+    )
+    leg.set_zorder(15)
+
+
+def _style_paper_deep_zoom_ax(ax, x_lim, y_lim, gdf_bn, borders_file):
+    ax.set_xlim(x_lim)
+    ax.set_ylim(y_lim)
+    if borders_file and gdf_bn is not None:
+        gdf_bn.plot(ax=ax, color="black", linewidth=0.8)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+
+
+def _finalize_paper_map_ax(ax, x_lim, y_lim) -> None:
+    """Restore geo limits + equal aspect after xarray plots (avoids square stretch)."""
+    ax.set_xlim(x_lim)
+    ax.set_ylim(y_lim)
+    ax.set_aspect("equal", adjustable="box")
+    ax.set_xlabel("")
+    ax.set_ylabel("")
+    ax.set_xticks([])
+    ax.set_yticks([])
+
+
 def _plot_jet_T_quiver_panel(
     ax,
     field_map: xr.Dataset,
@@ -558,7 +812,8 @@ def _plot_jet_T_quiver_panel(
     t_vmax: float,
     u_var: str,
     v_var: str,
-    pick_stride: int,
+    stride_lat: int,
+    stride_lon: int | None = None,
     quiver_ref: float,
     quiver_label: str,
     x_lim,
@@ -589,10 +844,10 @@ def _plot_jet_T_quiver_panel(
     )
     if quiver_color is not None:
         quiver_kw["color"] = quiver_color
-    q_plot = field_map.thin(pick_stride).plot.quiver(**quiver_kw)
+    q_plot = _thin_field_map(field_map, stride_lat, stride_lon).plot.quiver(**quiver_kw)
     _add_ws10_quiverkey(q_plot, quiver_ref, quiver_label)
     if q_skip_mask is not None:
-        _plot_q_mask_skip_dots(ax, field_map, q_skip_mask, pick_stride)
+        _plot_q_mask_skip_dots(ax, field_map, q_skip_mask, stride_lat, stride_lon)
     _add_ws10_key_box(ax, x_lim, y_lim)
     return mappable
 
@@ -697,10 +952,25 @@ def show_q_snapshots(
     q_deep_zoom_stride: int | None = None,
     show_grad_j_panels: bool = True,
     temperature_unit_label: str | None = None,
+    q_panel_indices: tuple[int, ...] | None = None,
+    paper_style: bool = False,
+    paper_lon_extent_mult: float = 1.0,
+    paper_lat_extent_mult: float = 1.0,
+    paper_fig_width: float | None = None,
+    paper_fig_height: float = 5.0,
+    output_basename: str | None = None,
+    dpi: int = 150,
 ):
     """Plot precomputed flux fields (7 panels per model, 3×3 WS10 layout).
 
     Set ``show_grad_j_panels=False`` for **q-only** (one row: domain | zoom | deep zoom).
+
+    Set ``q_panel_indices=(2,)`` with ``paper_style=True`` for a single deep-zoom panel per model
+    (third column; same rendering as the working A|B|C row, minimal text).
+
+    Paper deep-zoom (panel index 2): ``paper_lon_extent_mult`` / ``paper_lat_extent_mult``
+    widen the **map window** and **figure size** only. Quiver uses the same ``q_deep_zoom_stride``
+    as panel C on the **cropped** viewport so vectors / grid cells in view stay fixed (~1/s²).
 
     Row 1: flux **q** — domain | zoom | **deep zoom** (panel G, denser quiver).
 
@@ -743,40 +1013,101 @@ def show_q_snapshots(
         q_deep_zoom_stride if q_deep_zoom_stride is not None else _DEFAULT_Q_DEEP_ZOOM_STRIDE
     )
 
-    n_panels = 7 if show_grad_j_panels else _N_Q_PANELS
-    ncols = 3
-    nrows_per_model = 3 if show_grad_j_panels else 1
-    n_slots_per_model = nrows_per_model * ncols
-    nrows = rig_max * nrows_per_model
-    fig, axs = plt.subplots(
-        nrows=nrows, ncols=ncols, figsize=(5 * ncols, 5 * nrows), constrained_layout=True
-    )
-    if nrows == 1:
-        axs = np.array([axs])
-    if main_title is not None:
-        fig.suptitle(main_title, fontsize=22, y=1.02)
-    if use_quiver_lens:
-        arrow_note = (
-            f"Arrows: display lens ON (γ={display_magnitude_gamma:g}, "
-            f"min={display_min_arrow_frac:g}×key, max={display_max_arrow_frac:g}×key) — "
-            "direction kept; lengths remapped for visibility"
-        )
+    if q_panel_indices is not None:
+        if show_grad_j_panels:
+            raise ValueError("q_panel_indices requires show_grad_j_panels=False")
+        panels_to_plot = tuple(q_panel_indices)
+        ncols = len(panels_to_plot)
+        nrows_per_model = 1
+        n_panels = _N_Q_PANELS
+        n_slots_per_model = ncols
     else:
-        arrow_note = "Arrows: display lens OFF — raw qx/qy (true relative magnitudes; may hide weak vectors)"
+        panels_to_plot = None
+        n_panels = 7 if show_grad_j_panels else _N_Q_PANELS
+        ncols = 3
+        nrows_per_model = 3 if show_grad_j_panels else 1
+        n_slots_per_model = nrows_per_model * ncols
+
+    nrows = rig_max * nrows_per_model
+    row_h = 5.9 if paper_style else 5.0
+    if paper_style and panels_to_plot == (2,) and rig_max == 1:
+        if paper_fig_width is not None:
+            fig_w = float(paper_fig_width)
+            fig_h = float(paper_fig_height) * float(paper_lat_extent_mult)
+        else:
+            _probe_grid = get_target_grid(
+                target_res=_target_res_for_field(flux_by_model[my_models[0]]["T"])
+            )
+            _px, _py, _ = _panel_limits(
+                2,
+                _probe_grid,
+                q_deep_zoom_x=q_deep_x,
+                q_deep_zoom_y=q_deep_y,
+                q_deep_zoom_stride=q_deep_stride,
+            )
+            _px, _py = _expand_geo_limits(
+                _px,
+                _py,
+                lon_mult=paper_lon_extent_mult,
+                lat_mult=paper_lat_extent_mult,
+            )
+            fig_h = float(paper_fig_height) * float(paper_lat_extent_mult)
+            fig_w, fig_h = _paper_figsize_from_geo_extent(_px, _py, height_in=fig_h)
+    else:
+        fig_w, fig_h = 5 * ncols, row_h * nrows
+    fig, axs = plt.subplots(
+        nrows=nrows,
+        ncols=ncols,
+        figsize=(fig_w, fig_h),
+        constrained_layout=not paper_style,
+    )
+    if nrows == 1 and ncols == 1:
+        axs = np.array([[axs]])
+    elif nrows == 1:
+        axs = np.atleast_2d(axs)
+    elif ncols == 1:
+        axs = axs.reshape(-1, 1)
+
+    paper_fonts = _paper_font_sizes(fig_w, fig_h) if paper_style else None
+
+    title_fs = 14 if paper_style else 22
+    if main_title is not None and not paper_style:
+        fig.suptitle(main_title, fontsize=title_fs, y=1.02)
+
     q_mask_mode_resolved = _normalize_q_mask_mode(
         q_mask_mode,
         skip_quantile_pct=q_mask_skip_quantile_pct,
         abs_threshold=q_mask_abs_threshold,
     )
-    if q_mask_mode_resolved == "quantile":
-        arrow_note += (
-            f" | q mask: |q| <= p{q_mask_skip_quantile_pct:g} per slice (purple dots = masked)"
+    paper_mask_caption = (
+        _format_q_mask_caption(
+            q_mask_mode=q_mask_mode,
+            q_mask_skip_quantile_pct=q_mask_skip_quantile_pct,
+            q_mask_abs_threshold=q_mask_abs_threshold,
         )
-    elif q_mask_mode_resolved == "absolute":
-        arrow_note += (
-            f" | q mask: |q| <= {q_mask_abs_threshold:g} (purple dots = masked)"
-        )
-    fig.text(0.5, 0.005, arrow_note, ha="center", fontsize=10, style="italic")
+        if paper_style
+        else None
+    )
+    if not paper_style:
+        if use_quiver_lens:
+            arrow_note = (
+                f"Arrows: display lens ON (γ={display_magnitude_gamma:g}, "
+                f"min={display_min_arrow_frac:g}×key, max={display_max_arrow_frac:g}×key) — "
+                "direction kept; lengths remapped for visibility"
+            )
+        else:
+            arrow_note = (
+                "Arrows: display lens OFF — raw qx/qy (true relative magnitudes; may hide weak vectors)"
+            )
+        if q_mask_mode_resolved == "quantile":
+            arrow_note += (
+                f" | q mask: |q| <= p{q_mask_skip_quantile_pct:g} per slice (purple dots = masked)"
+            )
+        elif q_mask_mode_resolved == "absolute":
+            arrow_note += (
+                f" | q mask: |q| <= {q_mask_abs_threshold:g} (purple dots = masked)"
+            )
+        fig.text(0.5, 0.005, arrow_note, ha="center", fontsize=10, style="italic")
 
     im_mag = None
     for sim_row in range(rig_max):
@@ -795,7 +1126,12 @@ def show_q_snapshots(
             max_arrow_frac=display_max_arrow_frac,
         )
         q_raw_max = float(np.nanmax(np.hypot(flux["qx"], flux["qy"])))
-        if use_quiver_lens and q_raw_max > 0 and q_raw_max < 1e-4:
+        if (
+            not paper_style
+            and use_quiver_lens
+            and q_raw_max > 0
+            and q_raw_max < 1e-4
+        ):
             print(
                 f"Warning [{sim}]: max |q|={q_raw_max:.3e} — lens remaps arrow lengths "
                 f"(γ={display_magnitude_gamma:g}, min_frac={display_min_arrow_frac:g}); "
@@ -828,11 +1164,16 @@ def show_q_snapshots(
             )
             j_tr_vmax = float(np.nanpercentile(flux["J_trace"], 99)) or 1.0
 
-        for panel in range(n_slots_per_model):
-            grid_row = sim_row * nrows_per_model + panel // ncols
-            col = panel % ncols
+        panel_loop = panels_to_plot if panels_to_plot is not None else range(n_slots_per_model)
+        for slot_idx, panel in enumerate(panel_loop):
+            if panels_to_plot is not None:
+                grid_row = sim_row
+                col = slot_idx
+            else:
+                grid_row = sim_row * nrows_per_model + panel // ncols
+                col = panel % ncols
             ax = axs[grid_row, col]
-            if panel >= n_panels:
+            if panels_to_plot is None and panel >= n_panels:
                 ax.set_visible(False)
                 continue
 
@@ -843,32 +1184,83 @@ def show_q_snapshots(
                 q_deep_zoom_y=q_deep_y,
                 q_deep_zoom_stride=q_deep_stride,
             )
-            if panel // ncols == 0 or not show_grad_j_panels:
-                row_ylabel = sim
-            else:
-                row_ylabel = "grad T & J" if panel // ncols == 1 else ""
-            _style_q_panel_ax(
-                ax, x_lim, y_lim, gdf_bn, borders_file, sim, col, ylabel=row_ylabel if col == 0 else None
+            if panel == 2 and paper_style and (
+                paper_lon_extent_mult != 1.0 or paper_lat_extent_mult != 1.0
+            ):
+                x_lim, y_lim = _expand_geo_limits(
+                    x_lim,
+                    y_lim,
+                    lon_mult=paper_lon_extent_mult,
+                    lat_mult=paper_lat_extent_mult,
+                )
+            stride_lat = stride_lon = pick_stride
+            q_mask_plot = (
+                q_skip_mask if _q_mask_mode_used != "none" else None
             )
-            _annotate_flux_panel(ax, panel)
+            field_q_on_ax = field_q
+            q_mask_on_ax = q_mask_plot
+            if panel == 2:
+                field_q_on_ax = _crop_field_map_to_geo_box(field_q, x_lim, y_lim)
+                if q_mask_plot is not None:
+                    q_mask_on_ax = _crop_mask_to_geo_box(
+                        q_mask_plot, field_q, x_lim, y_lim
+                    )
+            if paper_style:
+                _style_paper_deep_zoom_ax(ax, x_lim, y_lim, gdf_bn, borders_file)
+            else:
+                if panel // ncols == 0 or not show_grad_j_panels:
+                    row_ylabel = sim
+                else:
+                    row_ylabel = "grad T & J" if panel // ncols == 1 else ""
+                _style_q_panel_ax(
+                    ax,
+                    x_lim,
+                    y_lim,
+                    gdf_bn,
+                    borders_file,
+                    sim,
+                    col,
+                    ylabel=row_ylabel if col == 0 else None,
+                )
+                _annotate_flux_panel(ax, panel)
 
             kind = _flux_panel_kind(panel)
             if kind == "q":
-                im_mag = _plot_jet_T_quiver_panel(
-                    ax,
-                    field_q,
-                    var,
-                    t_vmin=min_value,
-                    t_vmax=max_value,
-                    u_var="qx",
-                    v_var="qy",
-                    pick_stride=pick_stride,
-                    quiver_ref=q_key,
-                    quiver_label=f"q {q_tag}",
-                    x_lim=x_lim,
-                    y_lim=y_lim,
-                    q_skip_mask=q_skip_mask if _q_mask_mode_used != "none" else None,
-                )
+                if paper_style:
+                    im_mag = _plot_jet_T_quiver_panel_paper(
+                        ax,
+                        field_q_on_ax,
+                        var,
+                        t_vmin=min_value,
+                        t_vmax=max_value,
+                        u_var="qx",
+                        v_var="qy",
+                        stride_lat=stride_lat,
+                        stride_lon=stride_lon,
+                        q_skip_mask=q_mask_on_ax,
+                        x_lim=x_lim,
+                        y_lim=y_lim,
+                        legend_fontsize=(
+                            paper_fonts["legend"] if paper_fonts is not None else 7.0
+                        ),
+                    )
+                else:
+                    im_mag = _plot_jet_T_quiver_panel(
+                        ax,
+                        field_q_on_ax,
+                        var,
+                        t_vmin=min_value,
+                        t_vmax=max_value,
+                        u_var="qx",
+                        v_var="qy",
+                        stride_lat=stride_lat,
+                        stride_lon=stride_lon,
+                        quiver_ref=q_key,
+                        quiver_label=f"q {q_tag}",
+                        x_lim=x_lim,
+                        y_lim=y_lim,
+                        q_skip_mask=q_mask_on_ax,
+                    )
             elif show_grad_j_panels and kind == "grad":
                 im_mag = _plot_jet_T_quiver_panel(
                     ax,
@@ -878,7 +1270,8 @@ def show_q_snapshots(
                     t_vmax=max_value,
                     u_var="qx",
                     v_var="qy",
-                    pick_stride=pick_stride,
+                    stride_lat=stride_lat,
+                    stride_lon=stride_lon,
                     quiver_ref=g_key,
                     quiver_label=f"grad T {g_tag}",
                     x_lim=x_lim,
@@ -896,7 +1289,7 @@ def show_q_snapshots(
                     x_lim=x_lim,
                     y_lim=y_lim,
                 )
-                q_k = field_j_grad.thin(pick_stride).plot.quiver(
+                q_k = _thin_field_map(field_j_grad, stride_lat, stride_lon).plot.quiver(
                     ax=ax,
                     u="dTdx",
                     v="dTdy",
@@ -920,16 +1313,118 @@ def show_q_snapshots(
                 )
 
     if im_mag is not None:
-        cbar = fig.colorbar(im_mag, ax=axs, location="bottom", shrink=0.5, pad=0.06)
-        cbar.set_label(var + " " + labels.get(var, ""), fontsize=20)
-        cbar.ax.tick_params(labelsize=18)
+        if paper_style:
+            fig.subplots_adjust(top=0.90, bottom=0.14, left=0.02, right=0.98)
+            header_parts = []
+            if paper_mask_caption:
+                header_parts.append(paper_mask_caption)
+            if main_title:
+                header_parts.append(str(main_title))
+            if header_parts:
+                fig.suptitle(
+                    " - ".join(header_parts),
+                    fontsize=paper_fonts["header"],
+                    y=0.98,
+                )
+            cbar = fig.colorbar(
+                im_mag, ax=axs, location="bottom", shrink=0.48, pad=0.02, aspect=28
+            )
+            cbar.set_label(
+                var + " " + labels.get(var, ""),
+                fontsize=paper_fonts["cbar_label"],
+                labelpad=3,
+            )
+            cbar.ax.tick_params(
+                labelsize=paper_fonts["cbar_ticks"], length=2, width=0.6
+            )
+        else:
+            cbar = fig.colorbar(
+                im_mag, ax=axs, location="bottom", shrink=0.5, pad=0.06
+            )
+            cbar.set_label(var + " " + labels.get(var, ""), fontsize=20)
+            cbar.ax.tick_params(labelsize=18)
 
     if output_dir is not None:
-        filename = "Fig_q_snapshots_" + str(main_title) + ".jpg"
-        plt.savefig(output_dir + filename, bbox_inches="tight")
+        from pathlib import Path
+
+        out = Path(output_dir)
+        out.mkdir(parents=True, exist_ok=True)
+        if output_basename:
+            stem = "".join(
+                c if c.isalnum() or c in "-_" else "_" for c in str(output_basename)
+            )
+            path = out / f"{stem}.png"
+            fig.savefig(path, dpi=dpi, bbox_inches="tight", facecolor="white")
+            print(f"Saved {path}")
+        else:
+            filename = "Fig_q_snapshots_" + str(main_title) + ".jpg"
+            fig.savefig(out / filename, bbox_inches="tight")
+
     plt.show()
-    plt.close()
+    plt.close(fig)
     return fig
+
+
+def show_q_deep_zoom_paper(
+    spat_dist_df: pd.DataFrame,
+    flux_by_model: dict[str, dict[str, np.ndarray]],
+    *,
+    time_label: str,
+    variable: str = "2mT",
+    borders_file: str | None = None,
+    output_dir: str | None = None,
+    output_basename: str | None = None,
+    dpi: int = 300,
+    vector_display_boost: float | None = None,
+    q_display_boost: float | None = None,
+    use_quiver_lens: bool = True,
+    display_magnitude_gamma: float = 0.45,
+    display_min_arrow_frac: float = 0.15,
+    display_max_arrow_frac: float = 1.0,
+    q_mask_mode: str = "none",
+    q_mask_skip_quantile_pct: float = 0.0,
+    q_mask_abs_threshold: float | None = None,
+    q_deep_zoom_x: tuple[float, float] | None = None,
+    q_deep_zoom_y: tuple[float, float] | None = None,
+    q_deep_zoom_stride: int | None = None,
+    paper_lon_extent_mult: float = 3.0,
+    paper_lat_extent_mult: float = 2.0,
+    paper_fig_width: float | None = None,
+    paper_fig_height: float = 5.0,
+    temperature_unit_label: str | None = None,
+    show_mask_dots: bool = True,
+):
+    """Paper deep-zoom only — thin wrapper around ``show_q_snapshots`` (panel index 2)."""
+    return show_q_snapshots(
+        spat_dist_df,
+        flux_by_model,
+        variable=variable,
+        main_title=str(time_label),
+        borders_file=borders_file,
+        output_dir=output_dir,
+        output_basename=output_basename,
+        dpi=dpi,
+        vector_display_boost=vector_display_boost,
+        q_display_boost=q_display_boost,
+        use_quiver_lens=use_quiver_lens,
+        display_magnitude_gamma=display_magnitude_gamma,
+        display_min_arrow_frac=display_min_arrow_frac,
+        display_max_arrow_frac=display_max_arrow_frac,
+        q_mask_mode=q_mask_mode,
+        q_mask_skip_quantile_pct=q_mask_skip_quantile_pct,
+        q_mask_abs_threshold=q_mask_abs_threshold,
+        q_deep_zoom_x=q_deep_zoom_x,
+        q_deep_zoom_y=q_deep_zoom_y,
+        q_deep_zoom_stride=q_deep_zoom_stride,
+        show_grad_j_panels=False,
+        temperature_unit_label=temperature_unit_label,
+        q_panel_indices=(2,),
+        paper_style=True,
+        paper_lon_extent_mult=paper_lon_extent_mult,
+        paper_lat_extent_mult=paper_lat_extent_mult,
+        paper_fig_width=paper_fig_width,
+        paper_fig_height=paper_fig_height,
+    )
 
 
 def show_grad_K_debug_snapshots(*args, **kwargs):
