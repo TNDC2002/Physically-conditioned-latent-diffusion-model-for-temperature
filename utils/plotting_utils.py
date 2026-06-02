@@ -760,10 +760,24 @@ def _add_paper_flux_vector_note(
     show_mask_dots: bool,
     fontsize: float = 7.0,
 ) -> None:
-    """Lower-right white note: purple dot + quiverkey (panel C style), one shared box."""
+    """Compact lower-right note: right-anchored text, tight box width."""
     fs = fontsize
-    x0, y0, w = 0.47, 0.012, 0.51
-    h = 0.105 if show_mask_dots else 0.062
+    y0 = 0.012
+    h = 0.10 if show_mask_dots else 0.058
+    margin_r = 0.001
+    pad_r = 0.005
+    gap_sym_text = 0.011  # symbols closer to labels
+    sym_col_w = 0.014
+    pad_l = 0.011  # more inset from left box edge
+    x1 = 1.0 - margin_r
+    label_chars = max(len("Filtered |q|"), len("Retained q"))
+    label_w = max(0.052, label_chars * 0.0058 * (fs / 9.0))
+    x_text_r = x1 - pad_r
+    sym_left = x_text_r - label_w - gap_sym_text - sym_col_w
+    x_marker = sym_left + sym_col_w * 0.5
+    x_qk = x_marker + 0.010
+    x0 = sym_left - pad_l
+    w = x1 - x0
     ax.add_patch(
         patches.Rectangle(
             (x0, y0),
@@ -779,9 +793,9 @@ def _add_paper_flux_vector_note(
         )
     )
     if show_mask_dots:
-        y_row1 = y0 + h * 0.73
+        y_row1 = y0 + h * 0.74
         ax.plot(
-            x0 + 0.035,
+            x_marker,
             y_row1,
             marker="o",
             color="purple",
@@ -792,29 +806,40 @@ def _add_paper_flux_vector_note(
             clip_on=False,
         )
         ax.text(
-            x0 + 0.085,
+            x_text_r,
             y_row1,
             "Filtered |q|",
             transform=ax.transAxes,
             fontsize=fs,
             va="center",
-            ha="left",
+            ha="right",
             zorder=15,
             clip_on=False,
         )
-        qk_y = y0 + h * 0.27
+        y_row2 = y0 + h * 0.26
     else:
-        qk_y = y0 + h * 0.5
+        y_row2 = y0 + h * 0.5
     ax.quiverkey(
         quiver_plot,
-        x0 + 0.035,
-        qk_y,
+        x_qk,
+        y_row2,
         quiver_ref,
-        "Retained q",
+        "",
         labelpos="E",
         coordinates="axes",
         fontproperties={"size": fs},
     ).set_zorder(15)
+    ax.text(
+        x_text_r,
+        y_row2,
+        "Retained q",
+        transform=ax.transAxes,
+        fontsize=fs,
+        va="center",
+        ha="right",
+        zorder=15,
+        clip_on=False,
+    )
 
 
 def _style_paper_deep_zoom_ax(ax, x_lim, y_lim, gdf_bn, borders_file):

@@ -8,6 +8,7 @@ outputs/Our_results_trained_models_2mT*
 wandb/ 
 MeanFlow/
 pretrained_models/
+notebooks/figures/*
 
 # cache files
 src/utils/__pycache__/
