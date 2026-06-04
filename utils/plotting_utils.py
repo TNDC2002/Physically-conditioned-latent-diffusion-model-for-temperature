@@ -507,6 +507,13 @@ def _normalize_q_mask_mode(
     return mode
 
 
+def _effective_skip_quantile_pct(q_mag: np.ndarray, thr: float | None) -> float:
+    """Percent of |q| at or below ``thr`` (same semantics as quantile mask with that p%)."""
+    if thr is None:
+        return 0.0
+    return float(100.0 * np.mean(q_mag <= thr))
+
+
 def _q_mag_and_mask(
     qx: np.ndarray,
     qy: np.ndarray,
@@ -544,6 +551,9 @@ def summarize_q_mask_thresholds(
 
     - **|q| used for mask**: ``hypot(qx, qy)`` from the same ``T`` as this row's flux dict.
     - **Plot rule**: hide arrow / purple dot where ``|q| <= |q|_filter_threshold``.
+    - **skip_quantile_%**: effective percentile of this row's ``|q|`` at/below the filter
+      threshold (``100 * mean(|q| <= threshold)``); matches configured quantile in quantile
+      mode and is computed for absolute / none as well (0 when masking is off).
     - **Training (LMM)**: ``TemperatureFieldLosses`` keeps pixels with
       ``|q_gt| > at_qmag_min`` on **normalized** ``T_hr`` (COSMO-CLM z-score) only;
       ``q_pred`` does not affect the mask. Plot matches training only when the row's
@@ -582,6 +592,7 @@ def summarize_q_mask_thresholds(
             and float(abs_threshold) == float(training_at_qmag_min)
             and "z-score" in str(model)
         )
+        equiv_skip_pct = _effective_skip_quantile_pct(q_mag, thr)
         rows.append(
             {
                 "time": time_label,
@@ -591,7 +602,7 @@ def summarize_q_mask_thresholds(
                 "plot mask rule": plot_rule,
                 "matches training at_qmag_min?": matches_training,
                 "training at_qmag_min ref": training_at_qmag_min,
-                "skip_quantile_%": skip_quantile_pct if mode == "quantile" else np.nan,
+                "skip_quantile_%": equiv_skip_pct,
                 "abs_threshold_input": abs_threshold if mode == "absolute" else np.nan,
                 "|q|_filter_threshold": thr,
                 "n_pixels_masked": int(skip.sum()),
@@ -622,7 +633,8 @@ def summarize_q_mask_thresholds(
             continue
         print(
             f"  {r['model']}: filter |q| <= {r['|q|_filter_threshold']:.6e}  "
-            f"({r['n_pixels_masked']} px, {100 * r['frac_masked']:.1f}% of grid)  "
+            f"({r['n_pixels_masked']} px, {100 * r['frac_masked']:.1f}% of grid; "
+            f"equiv skip_quantile_%={r['skip_quantile_%']:.2f})  "
             f"| masked max={r['max_|q|_among_masked']:.6e}, kept min={r['min_|q|_among_kept']:.6e}, "
             f"field median={r['median_|q|_field']:.6e}, max={r['max_|q|_field']:.6e}"
         )

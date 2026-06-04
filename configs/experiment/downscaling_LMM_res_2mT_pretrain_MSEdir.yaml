@@ -74,7 +74,7 @@ model:
   at_lambda_mag: 0.01
   at_lambda_dir_cosine: 0.0
   at_lambda_dir_unit_mse: 1.0
-  at_loss_eps: 1.0e-15
+  at_loss_eps: 1.0e-14
   at_dx: 2000.0
   at_dy: -2000.0
   # GT |q| masks (AND if both set): quantile and/or absolute floor on |q_gt|.

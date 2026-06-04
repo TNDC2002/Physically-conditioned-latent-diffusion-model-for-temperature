@@ -9,9 +9,6 @@ from __future__ import annotations
 import torch
 import torch.nn.functional as F
 
-# Fixed floor for log(|q|) in L_mag only (fp32-safe; not tied to directional eps).
-_AT_MAG_EPS = 1e-12
-
 
 class TemperatureFieldLosses:
     """Stateless helpers; no registered parameters."""
@@ -228,8 +225,8 @@ class TemperatureFieldLosses:
     ) -> dict[str, torch.Tensor]:
         """Anisotropic Transport Loss with weighted directional components.
 
-        - L_mag = MSE(log(|q_pred|+eps_mag), log(|q_gt|+eps_mag)) with fixed ``_AT_MAG_EPS``
-        - L_dir_cosine / L_dir_unit_mse use ``eps`` (directional stabilization only)
+        - L_mag = MSE(log(|q_pred|+eps), log(|q_gt|+eps))
+        - L_dir_cosine / L_dir_unit_mse use ``eps`` for directional stabilization
         - L_dir = lambda_dir_cosine * L_dir_cosine + lambda_dir_unit_mse * L_dir_unit_mse
         - L_total = lambda_mag * L_mag + L_dir
 
@@ -248,9 +245,8 @@ class TemperatureFieldLosses:
             mag_g, qmag_quantile=qmag_quantile, qmag_min=qmag_min
         )
 
-        eps_mag = _AT_MAG_EPS
         l_mag = self._masked_mean(
-            (torch.log(mag_p + eps_mag) - torch.log(mag_g + eps_mag)) ** 2, mask
+            (torch.log(mag_p + eps) - torch.log(mag_g + eps)) ** 2, mask
         )
 
         dot = qx_p * qx_g + qy_p * qy_g
